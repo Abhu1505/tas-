@@ -1,1 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TAS Personal Training — Client &amp; Trainer Portal</title>
+<script>
+/* Device class detection (phone / tablet / laptop) — runs before first paint
+   so the layout adapts instantly and re-adapts on rotation or resize. */
+(function(){
+  function apply(){
+    var coarse = false, pointerFine = false;
+    try{ coarse = matchMedia('(pointer:coarse)').matches; }catch(e){}
+    try{ pointerFine = matchMedia('(hover:hover) and (pointer:fine)').matches; }catch(e){}
+    var w = innerWidth || document.documentElement.clientWidth || 9999;
+    var ua = navigator.userAgent || '';
+    var touchLike = coarse || (('ontouchstart' in window) && !pointerFine) ||
+      (/Android|iPhone|iPod/i.test(ua)) ||
+      (/iPad|Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    var cls = 'device-laptop';
+    if (w <= 700 && touchLike) cls = 'device-phone';
+    else if (w <= 1023 && touchLike) cls = 'device-tablet';
+    var c = document.documentElement.classList;
+    c.remove('device-phone','device-tablet','device-laptop');
+    c.add(cls);
+  }
+  apply();
+  window.addEventListener('resize', apply, {passive:true});
+  window.addEventListener('orientationchange', function(){ apply(); setTimeout(apply, 250); }, {passive:true});
+})();
+</script>
+<meta name="description" content="Professional personal training portal: session tracking, exercise library, progress analytics and approvals.">
+<meta name="theme-color" content="#1f4e3d" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1822" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="TAS Personal Training">
+<meta property="og:description" content="Track sessions, workouts and progress with your trainer.">
+<meta property="og:image" content="icons/icon-512.png">
+<!-- PWA / installable app -->
+<meta name="application-name" content="TAS Training">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TAS Training">
+<link rel="manifest" href="manifest.webmanifest">
+<!-- Embedded SVG logo lockup — used as favicon, app icon and watermark (no emoji) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="tas-mark" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="tasMarkG" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#1f4e3d"/><stop offset="1" stop-color="#38826a"/>
+      </linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="15" fill="url(#tasMarkG)"/>
+    <!-- dumbbell -->
+    <g stroke="#ffffff" stroke-width="4.6" stroke-linecap="round" fill="#ffffff">
+      <line x1="22" y1="20" x2="42" y2="20"/>
+      <rect x="13.5" y="13.5" width="7" height="13" rx="2.4" stroke="none"/>
+      <rect x="43.5" y="13.5" width="7" height="13" rx="2.4" stroke="none"/>
+    </g>
+    <text x="32" y="49" text-anchor="middle" font-family="Sora, Inter, Arial, sans-serif" font-weight="800" font-size="17" letter-spacing="1" fill="#ffffff">TAS</text>
+  </symbol>
+  <symbol id="tas-lockup" viewBox="0 0 236 64">
+    <use href="#tas-mark" width="64" height="64"/>
+    <text x="78" y="30" font-family="Sora, Inter, Arial, sans-serif" font-weight="800" font-size="22" letter-spacing="-0.5" fill="currentColor">TAS</text>
+    <text x="78" y="50" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="13" letter-spacing="0.2" fill="currentColor" opacity="0.75">Personal Training</text>
+  </symbol>
+</svg>
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon-precomposed" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<link rel="stylesheet" href="css/styles.css?v=tabs-stable-v31">
+<script>/* Pre-paint theme: AUTO ONLY — always follows the local sunrise/sunset
+   (Dubai fallback until geolocation resolves). The manual Light/Dark toggle
+   button was removed, so any legacy 'tas_theme_mode' override stored in
+   localStorage from older versions is ignored and cleared here. */
+(function(){
+  try{
+    // Clear any stale manual override from previous versions → force auto.
+    try{localStorage.removeItem('tas_theme_mode');}catch(e0){}
+    var t;
+    {
+      // Inline mini NOAA sun calc so there is no flash-of-wrong-theme.
+      var g=null;try{g=JSON.parse(localStorage.getItem('tas_geo')||'null');}catch(e2){}
+      var lat=g?g.lat:25.2, lon=g?g.lon:55.3;
+      var now=new Date(),rad=Math.PI/180,deg=180/Math.PI;
+      var start=Date.UTC(now.getUTCFullYear(),0,0);
+      var doy=Math.floor((Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-start)/864e5);
+      function sun(isRise){var lh=lon/15,t2=isRise?doy+((6-lh)/24):doy+((18-lh)/24);
+        var M=(0.9856*t2)-3.289,L=M+1.916*Math.sin(M*rad)+0.02*Math.sin(2*M*rad)+283;L=((L%360)+360)%360;
+        var RA=deg*Math.atan(0.91764*Math.tan(L*rad));RA=((RA%360)+360)%360;
+        RA+=Math.floor(L/90)*90-Math.floor(RA/90)*90;RA/=15;
+        var T=6.656+0.06571*t2+1.0027*lh,H=(T-RA)*15;H=((H+180)%360+360)%360-180;
+        var c=(Math.cos(90.833*rad)-Math.sin(lat*rad)*Math.sin(L*rad))/(Math.cos(lat*rad)*Math.cos(L*rad));
+        if(c>1||c<-1)return null;H=deg*Math.acos(isRise?Math.cos((360-H)*rad):H*rad)/15;return((H+lh)%24+24)%24;}
+      var sr=sun(true),ss=sun(false);
+      if(sr==null||ss==null){t=(now.getHours()>=18||now.getHours()<6)?'dark':'light';}
+      else{
+        // Compare in LOCAL wall-clock hours: convert UTC sun-hours to local
+        // using the browser's timezone offset (fixes wrong theme far from lon 55°E).
+        var off=-now.getTimezoneOffset()/60;
+        var ls=((sr+off)%24+24)%24, lt=((ss+off)%24+24)%24;
+        var ln=now.getHours()+now.getMinutes()/60;
+        t=(lt<=ls)?((ln>=lt||ln<ls)?'dark':'light'):((ln>=lt&&ln<ls)?'dark':'light');
+      }
+    }
+    if(t==='dark')document.documentElement.setAttribute('data-theme','dark');
+  }catch(e){}
+})();</script>
+</head>
+<body>
 
+<div id="bgWatermark" aria-hidden="true">
+  <svg class="wm-svg" viewBox="0 0 64 64"><use href="#tas-mark"/></svg>
+  <img data-gdrive-id="1N651kHeVrz6HEhAc1cRRKGx2DtS-IdX0" data-gdrive-hide-fallback="1" alt="">
+</div>
+
+<div class="unified-wrap">
+  <div class="card login-card" id="loginCard">
+    <!-- Brand mark: ONE compact header row. The photo logo now comes FIRST
+         (in front of the text, on the left) and is ENLARGED; the text column
+         that follows carries everything else in reading order:
+           • the "TAS / Personal Training" SVG wordmark
+           • the "Coaching portal · Dubai, UAE" tagline
+         Below the row sits the login heading — with the "🔐 access" badge
+         back beside it, slight above the form — then the subhead and the form.
+         Hidden entirely when logged in (only #loginCard shows at a time), and
+         wraps to a centred stack on narrow screens so the form stays above
+         the fold. -->
+    <div class="login-brand-row">
+      <div class="logo-photo-wrap" id="loginLogoPhoto">
+        <img data-gdrive-id="1N651kHeVrz6HEhAc1cRRKGx2DtS-IdX0" alt="TAS Personal Training logo photo">
+      </div>
+      <div class="login-brand-text">
+        <svg class="logo-lockup" viewBox="0 0 236 64" role="img" aria-label="TAS Personal Training"><use href="#tas-lockup"/></svg>
+        <span class="login-brand-tag">Coaching portal · Dubai, UAE</span>
+      </div>
+    </div>
+    <div class="login-head">
+      <!-- "slight above": the 🔐 access badge moved back down to sit just
+           above the login form, next to the heading — right after the
+           brand row and before the cloud status / inputs. -->
+      <div class="login-head-top">
+        <h2 id="modeTitle">Personal training</h2>
+        <span class="badge" id="modeBadge">🔐 access</span>
+      </div>
+      <div class="subhead" id="modeSubhead">Log in with your Login ID and password</div>
+    </div>
+    <!-- The manual Light/Dark toggle button was REMOVED on purpose:
+         the theme is fully automatic — it follows your local sunrise and
+         sunset (see the pre-paint script in <head> and applyAutoTheme() in
+         js/utils.js), so no manual control is needed. -->
+    <div id="cloudStatus" class="cloud-status"><div class="dot"></div><span id="cloudStatusText">Checking...</span></div>
+    <div class="input-group">
+      <label for="loginIdInput">Login ID</label>
+      <input type="text" id="loginIdInput" placeholder="Enter your Login ID" autocomplete="off" autocapitalize="characters">
+    </div>
+    <div class="input-group">
+      <label for="passwordInput">Password</label>
+      <input type="password" id="passwordInput" placeholder="Enter your password" autocomplete="off">
+    </div>
+    <button class="btn-primary" id="unifiedLoginBtn">Log in</button>
+    <div id="unifiedStatus" class="status-msg"></div>
+
+    <!-- NOTE: the "Need help? Contact the admin" email/Instagram/WhatsApp
+         block was REMOVED from below the login button — it already lives in
+         the site footer (#footerAdminContact), so showing it twice here was
+         redundant. -->
+  </div>
+
+  <!-- CLIENT DASHBOARD -->
+  <div class="card hidden dash-card client-dash" id="clientDashboard">
+    <div class="dash-header client-dash-header">
+      <div class="dash-identity">
+        <span class="dash-avatar" aria-hidden="true"><svg viewBox="0 0 64 64" class="avatar-mark"><use href="#tas-mark"/></svg></span>
+        <div>
+          <div class="dash-title">Welcome back, <span id="welcomeClientName">Client</span></div>
+          <div class="dash-subtitle">Your personal training portal · TAS</div>
+        </div>
+      </div>
+      <div class="dash-header-actions">
+        <button class="btn-notify btn-small" id="clientNotifyBtn" title="Turn on alerts for new updates">🔔 Enable</button>
+        <button class="btn-update-site btn-small hidden" id="clientUpdateSiteBtn" title="Click to see What's New in a popup, then update the site">🔄 Update Site</button>
+        <button class="btn-secondary btn-small" id="clientRefreshBtn" title="Reload latest data from the cloud">🔄 Refresh</button>
+        <button class="btn-secondary btn-small" id="clientLogoutBtn" title="Sign out (click again to confirm)">Log out</button>
+      </div>
+    </div>
+    <div id="clientPendingBanner" class="hidden client-pending-banner"><strong>⏳ Pending approval:</strong> Your changes are waiting for approval.</div>
+    <div class="stat-grid" id="clientStatGrid">
+      <div class="stat-tile"><span class="stat-tile-label">📆 Month</span><span class="stat-tile-value" id="clientDashMonth">—</span></div>
+      <div class="stat-tile success"><span class="stat-tile-label">✅ Sessions done</span><span class="stat-tile-value" id="clientDashDone">0</span></div>
+      <div class="stat-tile brand"><span class="stat-tile-label">💵 Amount due</span><span class="stat-tile-value" id="clientDashAmount">AED 0</span></div>
+    </div>
+    <div id="clientUpcomingBlock" class="client-upcoming-card">
+      <div class="client-upcoming-title">📅 Your upcoming schedule</div>
+      <div class="client-upcoming-hint">Tap ✏️ Edit on any day to update your exercises — changes apply only after your trainer approves them. Tap 🚫 Cancel to cancel a class (needs trainer approval). Times are set by your trainer.</div>
+      <div id="clientUpcomingList"></div>
+      <div id="clientUpcomingNote" class="hidden client-upcoming-note"></div>
+    </div>
+    <details class="howto-card" id="clientHowTo">
+      <summary class="howto-summary">ℹ️ How to use your portal — quick guide</summary>
+      <ol class="howto-list">
+        <li><strong>🏋️ My Plan</strong> shows every exercise your trainer assigned, with target sets × reps, weight and rest. The green bar tracks how many plan exercises you've completed in finished sessions.</li>
+        <li><strong>📅 Your upcoming schedule</strong> lists your next classes with the time set by your trainer. Tap <em>✏️ Edit</em> on any day to update your exercises — your edits are saved as proposals and only appear in the official log after your trainer approves them. Tap <em>🚫 Cancel</em> to cancel a class (the trainer's approval is needed before it disappears from the schedule). Times stay set by your trainer.</li>
+        <li><strong>🕓 Approval flow:</strong> cancelled-class requests show an "awaiting approval" chip until your trainer decides; they appear under ✅ Approvals → 📅 Schedule where the trainer approves or declines with a note.</li>
+        <li><strong>✅ Everything is trainer-approved.</strong> Your exercise edits and class cancellations never apply directly — the trainer confirms them first, so the official log always stays accurate.</li>
+        <li><strong>📜 History</strong> lists all your past workouts — both days with logged exercises and every finished session. Tap a day to expand it; use <em>✏️ Edit</em> to propose corrections.</li>
+        <li><strong>📈 Progress</strong>: add weight, measurements and photos here. Client entries go to your trainer for approval before they appear officially.</li>
+        <li><strong>👤 Profile</strong>: check your details and goals. Edits also need trainer approval.</li>
+        <li>Use <em>🔄 Refresh</em> at the top if your trainer just changed something and you don't see it yet.</li>
+      </ol>
+    </details>
+    <div class="tabs-bar client-tabs" role="tablist" aria-label="Client portal">
+      <button class="tab-btn active" data-ctab="plan">🏋️ My Plan</button>
+      <button class="tab-btn" data-ctab="history">📜 History</button>
+      <button class="tab-btn" data-ctab="progress">📈 Progress</button>
+      <button class="tab-btn" data-ctab="calculators">🧮 Calculators</button>
+      <button class="tab-btn" data-ctab="tools">⚡ Tools</button>
+      <button class="tab-btn" data-ctab="profile">👤 Profile</button>
+    </div>
+    <div class="tab-content" id="ctab-plan">
+      <div class="section-card plan-section">
+        <div class="section-card-title">🏋️ Your Exercise Plan</div>
+        <div class="section-card-hint">Assigned by your trainer · green ✔ means you completed it in a finished session</div>
+        <div id="clientPlanList"></div>
+      </div>
+    </div>
+    <div class="tab-content hidden" id="ctab-history">
+      <div class="section-card">
+        <div class="section-card-title">📜 Your Workout History</div>
+        <div class="section-card-hint">Tap a day to expand · double-tap to open the full log (finished days are locked — request an edit from there)</div>
+        <div id="clientHistoryList" class="progress-list"></div>
+      </div>
+    </div>
+    <div class="tab-content hidden" id="ctab-progress">
+      <!-- 📈 PROGRESS INSIGHTS (js/insights.js) — weekly & monthly charts +
+           approved calculator KPIs. Rendered from APPROVED data only:
+           progress entries, finished sessions and the approved profile. -->
+      <div class="section-card insights-panel" id="clientInsightsPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+          <span class="section-card-title" style="margin-bottom:0;">📊 Your Progress — Charts &amp; Key Metrics</span>
+          <span class="section-card-hint" style="margin:0;">Till date · built from your approved entries &amp; sessions</span>
+        </div>
+        <div class="insight-summary" id="insightSummary"></div>
+        <div class="insight-charts">
+          <div id="insightWeightChart" class="insight-chart-slot"></div>
+          <div id="insightBodyfatChart" class="insight-chart-slot"></div>
+          <div id="insightWeeklyChart" class="insight-chart-slot"></div>
+          <div id="insightMonthlyChart" class="insight-chart-slot"></div>
+        </div>
+        <div class="insight-kpis-title">🧮 Your approved calculator results</div>
+        <div class="kpi-grid" id="clientInsightKpis"></div>
+      </div>
+      <div class="section-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.7rem;flex-wrap:wrap;gap:0.5rem;">
+          <span class="section-card-title" style="margin-bottom:0;">📈 Your Progress</span>
+          <button class="btn-green-small btn-small" id="clientAddProgressBtn">➕ Add Entry</button>
+        </div>
+        <div id="clientProgressList" class="progress-list"></div>
+      </div>
+      <!-- Client's own saved monthly progress report with charts -->
+      <div class="section-card rp-report-area client-report-area" id="clientReportArea">
+        <div class="section-card-title">📊 My Monthly Progress Report</div>
+        <div class="section-card-hint">Auto-generated from your approved entries — compare any two months.</div>
+        <div class="month-filter-row">
+          <div class="input-group"><label for="crMonthFrom">Compare from</label><input type="month" id="crMonthFrom"></div>
+          <div class="input-group"><label for="crMonthTo">to</label><input type="month" id="crMonthTo"></div>
+        </div>
+        <div id="clientReportBody"></div>
+      </div>
+    </div>
+    <!-- 🧮 CALCULATORS TAB — Fitness Calculator Hub (js/calculators.js)
+         ONE shared input panel at the top; all 15 calculator cards read
+         from it and update live. Content is mounted by calculators.js. -->
+    <div class="tab-content hidden" id="ctab-calculators">
+      <div class="calc-hub-wrap" id="clientCalcHub"></div>
+    </div>
+    <!-- ⚡ TRAINING TOOLS TAB — workout timer + water tracker (js/tools.js)
+         Fully client-side: progress is saved per-client in localStorage. -->
+    <div class="tab-content hidden" id="ctab-tools">
+      <div class="tools-grid">
+        <!-- ⏱️ Interval / rest workout timer -->
+        <div class="section-card tool-card timer-card">
+          <div class="section-card-title">⏱️ Workout Timer</div>
+          <div class="section-card-hint">Interval &amp; rest countdown with sound + vibration when the tab is open.</div>
+          <div class="timer-display" id="toolTimerDisplay">00:30</div>
+          <div class="timer-rounds" id="toolTimerRounds">Round 1 of 8 · Rest next</div>
+          <div class="timer-progress"><div class="timer-progress-fill" id="toolTimerFill"></div></div>
+          <div class="timer-presets" role="group" aria-label="Timer presets">
+            <button class="chip-btn active" data-timer-preset="30-10-8" type="button">HIIT 30/10×8</button>
+            <button class="chip-btn" data-timer-preset="45-15-6" type="button">Tabata+ 45/15×6</button>
+            <button class="chip-btn" data-timer-preset="60-30-5" type="button">Strength 60/30×5</button>
+            <button class="chip-btn" data-timer-preset="90-30-4" type="button">Long 90/30×4</button>
+          </div>
+          <div class="timer-custom-row">
+            <div class="input-group"><label for="toolWorkSec">Work (s)</label><input type="number" id="toolWorkSec" min="5" max="600" value="30" inputmode="numeric"></div>
+            <div class="input-group"><label for="toolRestSec">Rest (s)</label><input type="number" id="toolRestSec" min="5" max="600" value="10" inputmode="numeric"></div>
+            <div class="input-group"><label for="toolRounds">Rounds</label><input type="number" id="toolRounds" min="1" max="99" value="8" inputmode="numeric"></div>
+          </div>
+          <div class="timer-actions">
+            <button class="btn-primary btn-small" id="toolTimerStartBtn" type="button">▶ Start</button>
+            <button class="btn-secondary btn-small" id="toolTimerPauseBtn" type="button" disabled>⏸ Pause</button>
+            <button class="btn-secondary btn-small" id="toolTimerResetBtn" type="button">↺ Reset</button>
+            <button class="chip-btn" id="toolSoundToggle" type="button" aria-pressed="true" title="Beep at the end of each phase">🔊 Sound</button>
+          </div>
+        </div>
+        <!-- 💧 Daily water tracker -->
+        <div class="section-card tool-card water-card">
+          <div class="section-card-title">💧 Water Tracker</div>
+          <div class="section-card-hint">Tap a glass to log today's intake · resets automatically every day.</div>
+          <div class="water-count" id="toolWaterCount">0 / 8 glasses</div>
+          <div class="water-glasses" id="toolWaterGlasses" role="group" aria-label="Glasses of water today"></div>
+          <div class="water-actions">
+            <button class="chip-btn" id="toolWaterMinus" type="button" aria-label="Remove one glass">➖</button>
+            <button class="btn-primary btn-small" id="toolWaterPlus" type="button">➕ Add glass</button>
+            <button class="chip-btn" id="toolWaterGoalBtn" type="button" title="Change daily goal">🎯 Goal: <span id="toolWaterGoalLabel">8</span></button>
+          </div>
+          <div class="water-progress"><div class="water-progress-fill" id="toolWaterFill"></div></div>
+        </div>
+        <!-- ✨ Quick motivation -->
+        <div class="section-card tool-card quote-card">
+          <div class="section-card-title">✨ Daily Motivation</div>
+          <div class="quote-text" id="toolQuoteText">Loading…</div>
+          <div class="quote-actions"><button class="chip-btn" id="toolQuoteNext" type="button">🔄 Another one</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-content hidden" id="ctab-profile">
+      <div class="section-card">
+        <!-- ✏️ Edit Profile button removed: the 👤 My Profile view IS the
+             editor now — basic details + 📌 Shared Inputs merged into ONE
+             form that is sent for approval at once via "📩 Save to Profile". -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.7rem;flex-wrap:wrap;gap:0.5rem;">
+          <span class="section-card-title" style="margin-bottom:0;">👤 My Profile</span>
+          <span class="section-card-hint" style="margin:0;">✍️ Edit everything below and press “📩 Save to Profile” — all items go to your trainer for approval together.</span>
+        </div>
+        <div id="clientProfileView"></div>
+      </div>
+    </div>
+  </div><!-- /clientDashboard -->
+
+  <!-- ADMIN DASHBOARD -->
+  <div class="card hidden dash-card admin-dash" id="adminDashboard">
+    <div class="dash-header">
+      <div class="dash-identity">
+        <span class="dash-avatar admin" aria-hidden="true">⚙️</span>
+        <div>
+          <div class="dash-title">Trainer Dashboard</div>
+          <div class="dash-subtitle">Signed in as <span id="adminDisplayId">—</span></div>
+        </div>
+      </div>
+      <div class="dash-header-actions">
+        <button class="btn-send-all-top btn-small" id="sendAllTopBtn">📢 Broadcast</button>
+        <button class="btn-notify btn-small" id="notifyBtn">🔔 Enable</button>
+        <button class="btn-approvals btn-small" id="approvalsBtn">✅ Approvals <span id="approvalsCountBadge" class="badge-count hidden">0</span></button>
+        <button class="btn-secondary btn-small" id="classTimesBtn" title="Set every client's class time in one place">⏰ Class Times</button>
+        <button class="btn-exercise btn-small" id="exerciseLibraryBtn">🏋️ Library</button>
+        <button class="btn-secondary btn-small" id="reportsBtn" title="Monthly progress reports & charts">📊 Reports</button>
+        <button class="btn-settings btn-small" id="openSettingsBtn">⚙️ Settings</button>
+        <button class="btn-update-site btn-small hidden" id="adminUpdateSiteBtn" title="Click to see What's New in a popup, then update the site">🔄 Update Site</button>
+        <button class="btn-secondary btn-small" id="adminRefreshBtn" title="Reload all data from the cloud">🔄 Refresh</button>
+        <button class="btn-secondary btn-small" id="adminLogoutBtn" title="Sign out (click again to confirm)">Log out</button>
+      </div>
+    </div>
+
+    <div id="sendAllTopStatus" class="status-msg"></div>
+
+    <!-- ===================== ADMIN: HOME / CLIENTS SPLIT =====================
+         The admin dashboard is split into two workspaces so the home screen
+         stays clean and professional:
+           • Home (🏠)      → client creation + quick stats only
+           • Clients (📋)   → the roster, per-client management, library,
+                              class times, client requests, settings & reports
+         Opening any panel/button automatically switches to the right tab. -->
+    <div class="tabs-bar admin-workspace-tabs" role="tablist" aria-label="Admin workspace">
+      <button class="tab-btn active" data-atab2="home" type="button" role="tab" id="adminTabHomeBtn">🏠 Home</button>
+      <button class="tab-btn" data-atab2="clients" type="button" role="tab" id="adminTabClientsBtn">📋 Clients <span id="adminClientsTabCount" class="badge-count">0</span></button>
+      <button class="tab-btn" data-atab2="calculators" type="button" role="tab" id="adminTabCalculatorsBtn">🧮 Calculators</button>
+    </div>
+
+    <!-- ---------- WORKSPACE 1: HOME — create clients quickly ---------- -->
+    <div id="adminWorkspaceHome" class="admin-workspace">
+      <div class="home-stats-row" id="homeStatsRow" aria-label="Business snapshot">
+        <div class="home-stat"><span class="hs-icon">👥</span><span class="hs-value" id="hsTotalClients">0</span><span class="hs-label">Clients</span></div>
+        <div class="home-stat"><span class="hs-icon">✅</span><span class="hs-value" id="hsActiveClients">0</span><span class="hs-label">Active</span></div>
+        <div class="home-stat"><span class="hs-icon">⏳</span><span class="hs-value" id="hsPendingApprovals">0</span><span class="hs-label">Pending approvals</span></div>
+        <div class="home-stat"><span class="hs-icon">📈</span><span class="hs-value" id="hsMonthSessions">0</span><span class="hs-label">Sessions this month</span></div>
+        <div class="home-stat"><span class="hs-icon">💵</span><span class="hs-value" id="hsMonthRevenue">0</span><span class="hs-label">Revenue this month (AED)</span></div>
+      </div>
+
+      <div class="admin-section-title">➕ Create new client</div>
+      <div class="tabs-bar admin-create-tabs" role="tablist" aria-label="Create client sections">
+        <button class="tab-btn active" data-ctabform="details" type="button" role="tab">👤 Details</button>
+        <button class="tab-btn" data-ctabform="gym" type="button" role="tab">🏢 Gym / Club</button>
+      </div>
+
+      <div class="tab-content" id="ctabform-details">
+        <div class="contact-picker-row">
+          <div class="input-group" style="flex:2 1 220px;">
+            <label for="newClientName">Full name</label>
+            <input type="text" id="newClientName" placeholder="Alex Rivera">
+          </div>
+          <button class="btn-contact hidden" id="pickContactBtn">📇 Pick from Contacts</button>
+        </div>
+        <div id="contactHint" class="contact-hint hidden">💡 Contact picker works on mobile only.</div>
+        <div class="flex-row">
+          <div class="input-group" style="flex:2 1 180px;"><label for="newClientPhone">WhatsApp (no +)</label><input type="text" id="newClientPhone" placeholder="919876543210" inputmode="numeric"></div>
+          <div class="input-group" style="flex:2 1 200px;"><label for="newClientEmail">Email (optional)</label><input type="email" id="newClientEmail"></div>
+        </div>
+        <div class="flex-row">
+          <div class="input-group" style="flex:1 1 110px;"><label for="newClientRate">Rate (AED)</label><input type="number" id="newClientRate" value="200" min="1" inputmode="numeric"></div>
+        </div>
+      </div>
+
+      <div class="tab-content hidden" id="ctabform-gym">
+        <div class="flex-row">
+          <div class="input-group" style="flex:1 1 220px;">
+            <label for="newClientGym">Gym / club name</label>
+            <input type="text" id="newClientGym" list="gymNameList" placeholder="e.g. FitZone Dubai Marina" autocomplete="off">
+            <datalist id="gymNameList"></datalist>
+          </div>
+          <div class="input-group" style="flex:1 1 160px;">
+            <label for="newClientGymBranch">Branch / area (optional)</label>
+            <input type="text" id="newClientGymBranch" placeholder="e.g. Marina Walk">
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="newClientGymNote">Gym notes (optional)</label>
+          <input type="text" id="newClientGymNote" placeholder="e.g. Member ID, access hours, equipment to use">
+        </div>
+        <div class="classtimes-hint">🏢 The gym name shows on the client's profile and in the client list, so you always know where each client trains.</div>
+      </div>
+
+      <button class="btn-admin" id="createClientBtn" style="width:100%;">➕ Create Client</button>
+      <div id="createClientStatus" class="status-msg"></div>
+      <div id="newClientCredsBox" class="credentials-box hidden">
+        <div style="font-weight:700;color:#1f4e3d;font-size:0.85rem;margin-bottom:0.5rem;">✅ Client Created — Share Credentials</div>
+        <div class="row"><span class="label">Login ID</span><span class="value" id="newClientCredsLogin">—</span></div>
+        <div class="row"><span class="label">Password</span><span class="value" id="newClientCredsPass">—</span></div>
+        <div style="font-size:0.7rem;color:#4d6b5a;margin-top:0.5rem;">🔒 This password is permanent and will never change.</div>
+      </div>
+
+      <div class="section-card info-strip" style="margin-top:1.1rem;">
+        <div style="font-size:0.85rem;color:var(--info);"><strong>📋 Manage clients:</strong> open the <em>Clients</em> tab above for the full roster, sessions, plans, progress reports, class times, client requests, library &amp; settings.</div>
+        <button class="btn-history btn-small" id="goToClientsTabBtn">📋 Open Clients Tab</button>
+      </div>
+    </div><!-- /adminWorkspaceHome -->
+
+    <!-- ---------- WORKSPACE 2: CLIENTS — roster & everything else ---------- -->
+    <div id="adminWorkspaceClients" class="admin-workspace hidden">
+
+    <div id="approvalsPanel" class="settings-panel approvals-panel hidden">
+      <h4 style="color:#e65100;">📋 Approvals</h4>
+      <button class="panel-close-x" type="button" data-close-panel="approvalsPanel" aria-label="Close panel">✕</button>
+      <div style="display:flex;gap:0.4rem;margin-bottom:0.7rem;flex-wrap:wrap;">
+        <button class="btn-orange-small btn-small tab-approval active" data-atab="pending">⏳ Pending</button>
+        <button class="btn-secondary btn-small tab-approval" data-atab="completed">✅ Completed</button>
+      </div>
+      <div style="display:flex;gap:0.4rem;margin-bottom:0.9rem;flex-wrap:wrap;">
+        <button class="btn-orange-small btn-small tab-approval-type active" data-atype="profile">👤 Profile</button>
+        <button class="btn-secondary btn-small tab-approval-type" data-atype="progress">📈 Progress</button>
+        <button class="btn-secondary btn-small tab-approval-type" data-atype="workout">🔒 Workout edits</button>
+      </div>
+      <div id="approvalsList"></div>
+      <div id="approvalsStatus" class="status-msg"></div>
+    </div>
+
+    <!-- ===== ADMIN: CLASS TIMES — set every client's time in one place ===== -->
+    <div id="classTimesPanel" class="settings-panel classtimes-panel hidden">
+      <h4>⏰ Class Times — all clients in one table</h4>
+      <button class="panel-close-x" type="button" data-close-panel="classTimesPanel" aria-label="Close panel">✕</button>
+      <p class="classtimes-hint">Pick a date 📅, choose the time, then press <strong>💾 Save All Times</strong>. Saved times appear instantly on that day in the Sessions grid and in each client's portal.</p>
+      <div class="classtimes-toolbar">
+        <div class="input-group"><label for="ctFilterClient">Client</label>
+          <select id="ctFilterClient"><option value="">All clients</option></select>
+        </div>
+        <div class="input-group"><label for="ctMonthSelect">Month</label>
+          <select id="ctMonthSelect">
+            <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+            <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+            <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+            <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+          </select>
+        </div>
+        <div class="input-group"><label for="ctDefaultTime">Quick-fill time</label><input type="time" id="ctDefaultTime" value="07:00"></div>
+      </div>
+      <div class="classtimes-quick">
+        <button class="btn-secondary btn-small" id="ctApplyWeekdaysBtn" type="button">🗓 Apply to Mon–Sat this month</button>
+        <button class="btn-secondary btn-small" id="ctAddRowBtn" type="button">➕ Add row</button>
+        <span class="classtimes-count" id="ctClientCount">📋 Clients listed automatically</span>
+      </div>
+      <div class="classtimes-table-wrap">
+        <table class="classtimes-table" aria-label="Client class times">
+          <thead>
+            <tr><th scope="col">Client name</th><th scope="col">Date 📅</th><th scope="col">Time ⏰</th><th scope="col">Note (optional)</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+          </thead>
+          <tbody id="classTimesTableBody"></tbody>
+        </table>
+      </div>
+      <div class="classtimes-actions">
+        <button class="btn-admin" id="saveAllTimesBtn" type="button">💾 Save All Times</button>
+        <button class="btn-secondary" id="closeClassTimesBtn" type="button">Close</button>
+      </div>
+      <div id="classTimesStatus" class="status-msg"></div>
+    </div>
+
+    <div id="settingsPanel" class="settings-panel hidden">
+      <h4>⚙️ Admin Settings</h4>
+      <button class="panel-close-x" type="button" data-close-panel="settingsPanel" aria-label="Close panel">✕</button>
+      <div class="flex-row">
+        <div class="input-group" style="flex:1 1 180px;"><label for="settingsLoginId">Admin Login ID</label><input type="text" id="settingsLoginId"></div>
+        <div class="input-group" style="flex:1 1 180px;">
+          <label for="settingsCurrentPassword">Current password</label>
+          <div class="password-input-wrapper"><input type="password" id="settingsCurrentPassword"><button class="password-toggle" data-target="settingsCurrentPassword">👁️</button></div>
+        </div>
+      </div>
+      <div class="flex-row">
+        <div class="input-group" style="flex:1 1 180px;">
+          <label for="settingsNewPassword">New password</label>
+          <div class="password-input-wrapper"><input type="password" id="settingsNewPassword"><button class="password-toggle" data-target="settingsNewPassword">👁️</button></div>
+        </div>
+        <div class="input-group" style="flex:1 1 180px;">
+          <label for="settingsConfirmPassword">Confirm password</label>
+          <div class="password-input-wrapper"><input type="password" id="settingsConfirmPassword"><button class="password-toggle" data-target="settingsConfirmPassword">👁️</button></div>
+        </div>
+      </div>
+      <div class="input-group"><label for="settingsArchiveEmail">Archive email (wipe report sends here)</label><input type="email" id="settingsArchiveEmail"></div>
+      <button class="btn-save-settings" id="saveSettingsBtn">💾 Save Settings</button>
+      <div id="settingsStatus" class="status-msg"></div>
+      <div class="danger-panel">
+        <h4>🚨 Danger Zone — Email & Wipe All Data</h4>
+        <p>The full data dump (all clients, sessions, exercise logs per day, progress, approvals) will be emailed to <strong>Archive email</strong>, then permanently deleted.</p>
+        <button class="btn-clear-all" id="clearAllBtn">🗑️ Email & Wipe All Data</button>
+      </div>
+    </div>
+
+    <div id="libraryPanel" class="settings-panel library-panel hidden">
+      <h4 style="color:#0d47a1;">🏋️ Exercise Library</h4>
+      <button class="panel-close-x" type="button" data-close-panel="libraryPanel" aria-label="Close panel">✕</button>
+      <button class="btn-exercise" id="addExerciseBtn">➕ Add New Exercise</button>
+      <div id="libraryList" class="library-list" style="margin-top:0.9rem;"></div>
+      <div id="libraryStatus" class="status-msg"></div>
+    </div>
+
+    <details class="howto-card admin-howto">
+      <summary class="howto-summary">ℹ️ Trainer quick guide — how everything works</summary>
+      <ol class="howto-list">
+        <li><strong>➕ Create client:</strong> fill name + WhatsApp and press <em>Create Client</em>, then share the generated Login ID &amp; password. Passwords are permanent.</li>
+        <li><strong>📊 Sessions tab:</strong> pick a month, press <em>⏰ Time</em> to schedule a class for a day, and tick the checkbox to mark a session <em>finished</em>. Finished days lock their workout log.</li>
+        <li><strong>🏋️ Exercises (Template):</strong> tick library exercises to assign them to this client and optionally override sets/reps/weight/rest/notes — the client sees exactly this under <em>My Plan</em>.</li>
+        <li><strong>📝 Log:</strong> open any day to add/edit exercises. To edit a locked (finished) day, use the <em>🔓 Unlock for editing</em> switch inside that day's log.</li>
+        <li><strong>✅ Approvals:</strong> review client profile edits, progress entries and workout-edit requests here; approving applies them instantly to the client portal.</li>
+        <li><strong>📢 Broadcast / 🔔 Notify:</strong> send a message to all clients and enable browser alerts for new approval requests.</li>
+        <li>Press <em>🔄 Refresh</em> anytime to pull the latest cloud data.</li>
+      </ol>
+    </details>
+
+    <div class="admin-section-title">📋 Client list</div>
+    <div class="client-search-row">
+      <input type="search" id="clientSearchInput" placeholder="🔍 Search clients by name, login ID or phone…" autocomplete="off" aria-label="Search clients">
+      <span id="clientSearchCount" class="client-search-count"></span>
+    </div>
+    <div id="clientListContainer" class="client-list"><div class="empty-message">Loading...</div></div>
+
+    <div id="clientDetailPanel" class="hidden client-detail-panel">
+      <div class="client-header-info">
+        <div class="client-header-left">
+          <span class="client-header-name" id="detailClientName">—</span>
+          <span id="detailClientStatusPill" class="hidden client-header-status-closed">● CLOSED</span>
+        </div>
+        <div class="client-header-rate">💵 AED <input type="number" id="ratePerSession" class="rate-input" value="200" min="1" inputmode="numeric"></div>
+      </div>
+      <div class="credentials-box">
+        <div style="font-weight:700;color:#1f4e3d;font-size:0.85rem;margin-bottom:0.5rem;">🔑 Client Credentials</div>
+        <div class="row"><span class="label">Login ID</span><span class="value" id="detailClientLogin">—</span></div>
+        <div class="row"><span class="label">Password</span><span class="value" id="detailClientPass">—</span></div>
+        <div style="font-size:0.7rem;color:#4d6b5a;margin-top:0.5rem;">🔒 Password is permanent — created once at signup.</div>
+      </div>
+      <div id="closedClientBanner" class="hidden closed-client-banner">
+        <div>
+          <div class="closed-client-banner-text">🔒 This client is CLOSED</div>
+          <div class="closed-client-banner-sub">They can't log in or receive reminders.</div>
+        </div>
+        <button class="btn-reopen" id="reopenClientBtn">🔓 Reopen</button>
+      </div>
+      <div id="closeClientBar" style="margin-bottom:1.1rem;display:flex;justify-content:flex-end;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn-secondary btn-small" id="deleteClientBtn">🗑️ Delete</button>
+        <button class="btn-danger btn-small" id="closeClientBtn">🔒 Close</button>
+      </div>
+      <div class="section-card info-strip">
+        <div style="font-size:0.85rem;color:var(--info);"><strong>📋 Track your work:</strong> Review everything you've done this month.</div>
+        <button class="btn-history btn-small" id="viewLastSessionBtn">📅 View Month Summary</button>
+      </div>
+      <div class="tabs-bar">
+        <button class="tab-btn active" data-tab="reminder">📨 Message</button>
+        <button class="tab-btn" data-tab="tracker">📊 Sessions</button>
+        <button class="tab-btn" data-tab="plan">🏋️ Exercises (Template)</button>
+        <button class="tab-btn" data-tab="progress">📈 Progress</button>
+      </div>
+      <div class="tab-content" id="tab-reminder">
+        <div class="reminder-section">
+          <h4>📨 Personal message to <span id="reminderClientNameInline">—</span></h4>
+          <div style="font-size:0.75rem;color:#1f4e3d;margin-bottom:0.5rem;background:#ffffffaa;padding:0.35rem 0.7rem;border-radius:0.6rem;display:inline-block;">
+            📱 To: <span id="reminderPhoneDisplay" style="font-family:monospace;font-weight:700;">—</span>
+          </div>
+          <div class="input-group"><label for="reminderNote">Personal note (optional)</label><input type="text" id="reminderNote" placeholder="Optional" value=""></div>
+          <div class="reminder-preview" id="reminderPreview"><strong>Preview:</strong> <span id="reminderPreviewText">—</span></div>
+          <div class="action-buttons">
+            <button class="btn-whatsapp" id="sendWhatsappBtn">📱 WhatsApp</button>
+            <button class="btn-email" id="sendEmailBtn">✉️ Email</button>
+          </div>
+          <div id="reminderStatus" class="status-msg"></div>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-tracker">
+        <div class="month-selector">
+          <label for="monthSelect">Month:</label>
+          <select id="monthSelect">
+            <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+            <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+            <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+            <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+          </select>
+          <span class="locked-msg">🔒 admin unchecks only</span>
+        </div>
+        <div id="sessionsGridContainer"></div>
+        <div class="summary-box">
+          <div>
+            <div class="summary-text">✅ Completed: <span id="summaryDoneCount">0</span></div>
+            <div class="summary-text" style="font-size:0.82rem;">Rate: <strong>AED <span id="summaryRate">200</span></strong></div>
+          </div>
+          <div>
+            <div class="summary-amount">AED <span id="summaryTotalAmount">0</span></div>
+            <div class="note-admin">Checked only</div>
+          </div>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-plan">
+        <div class="reminder-section plan-template-section">
+          <h4>🏋️ Exercise Template (optional)</h4>
+          <div style="font-size:0.78rem;color:#0d47a1;margin-bottom:0.9rem;background:#ffffffaa;padding:0.5rem 0.8rem;border-radius:0.7rem;line-height:1.5;">
+            ⚠️ This is only a starting reference.
+          </div>
+          <div id="assignList" class="assign-list"><div class="empty-message">Loading...</div></div>
+          <div id="assignStatus" class="status-msg"></div>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-progress">
+        <div class="reminder-section admin-progress-section">
+          <h4>📈 Client Progress</h4>
+          <button class="btn-green-small btn-small" id="adminAddProgressBtn" style="margin-bottom:0.7rem;">➕ Add Entry (as Admin)</button>
+          <div id="adminProgressList" class="progress-list"></div>
+        </div>
+        <div class="section-card">
+          <div class="section-card-title">📊 Monthly Progress Dashboard</div>
+          <div class="section-card-hint">Every client must add at least one progress entry each month. Green = on track, red = missing month.</div>
+          <div id="progressDashboardContainer"></div>
+        </div>
+      </div>
+    <div id="noClientSelectedMsg" style="margin-top:1.2rem;color:#7893a8;font-style:italic;text-align:center;padding:0.9rem;font-size:0.85rem;">
+      👆 Select a client above to manage.
+    </div>
+
+    <!-- ===== ADMIN: PROFESSIONAL PROGRESS REPORTS (saved, month-over-month) ===== -->
+    <div id="reportsPanel" class="settings-panel reports-panel hidden">
+      <h4>📊 Progress Reports — charts &amp; month-over-month comparison</h4>
+      <button class="panel-close-x" type="button" data-close-panel="reportsPanel" aria-label="Close panel">✕</button>
+      <p class="classtimes-hint">Reports are generated from each client's monthly progress entries (weight, body fat, measurements), <strong>saved permanently</strong>, and compared across any two months. Generate one at the start of every month to build up history.</p>
+      <div class="month-filter-row">
+        <div class="input-group"><label for="rpClientSelect">Client</label>
+          <select id="rpClientSelect"><option value="">— Select client —</option></select>
+        </div>
+        <div class="input-group"><label for="rpMonthFrom">Compare from</label><input type="month" id="rpMonthFrom"></div>
+        <div class="input-group"><label for="rpMonthTo">to</label><input type="month" id="rpMonthTo"></div>
+      </div>
+      <div class="classtimes-quick">
+        <button class="btn-admin btn-small" id="rpGenerateBtn" type="button">⚡ Generate &amp; Save Report</button>
+        <button class="btn-secondary btn-small" id="rpPrintBtn" type="button">🖨️ Print / PDF</button>
+        <button class="btn-green-small btn-small" id="rpShareBtn" type="button">📩 Send to Client</button>
+      </div>
+      <div id="rpStatus" class="status-msg"></div>
+      <div id="rpReportArea" class="rp-report-area"></div>
+      <details class="howto-card" open>
+        <summary class="howto-summary">🗂 Saved report history</summary>
+        <div id="rpHistoryList" class="rp-history-list"></div>
+      </details>
+    </div>
+  </div><!-- /adminWorkspaceClients -->
+
+    <!-- ---------- WORKSPACE 3: CALCULATORS — Fitness Calculator Hub ----------
+         Same hub as the client portal, with a client selector on top so the
+         trainer can preview/adjust any client's saved shared inputs. The
+         selected client's values load from fitness_inputs and edits save back
+         to that client (debounced autosave in js/calculators.js). -->
+    <div id="adminWorkspaceCalculators" class="admin-workspace hidden">
+      <div class="calc-client-bar">
+        <div class="input-group" style="flex:1 1 240px;margin:0;">
+          <label for="adminCalcClientSelect">Viewing calculators for</label>
+          <select id="adminCalcClientSelect">
+            <option value="">— My own demo values (not saved) —</option>
+          </select>
+        </div>
+        <span class="calc-client-hint">💾 Changes autosave to the selected client's cloud profile.</span>
+      </div>
+      <div class="calc-hub-wrap" id="adminCalcHub"></div>
+    </div><!-- /adminWorkspaceCalculators -->
+  </div>
+
+<!-- MODALS -->
+<div id="dayLogModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header orange"><h3>📝 Workout Log</h3><p id="dayLogDateLabel">—</p></div>
+    <div class="modal-body">
+      <input type="hidden" id="dayLogDate">
+      <div id="dayLogLockBanner"></div>
+      <div id="dayLogExisting"></div>
+
+      <div class="add-exercise-box">
+        <button type="button" class="add-exercise-toggle" id="addExerciseToggleBtn" aria-expanded="false" aria-controls="addExerciseBody">
+          <span class="aet-label">➕ Add exercise</span><span class="aet-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="add-exercise-body hidden" id="addExerciseBody">
+
+        <!-- Cascading dropdowns -->
+        <div class="free-add-row" style="flex-direction:column;align-items:stretch;gap:0.6rem;">
+        <div class="field">
+          <label for="libCategorySelect">Category</label>
+          <select id="libCategorySelect">
+            <option value="">— Select Category —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="libSubCategorySelect">Sub-category</label>
+          <select id="libSubCategorySelect">
+            <option value="">— Select Sub-category —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="libExerciseSelect">Exercise</label>
+          <select id="libExerciseSelect">
+            <option value="">— Select Exercise —</option>
+          </select>
+        </div>
+        <button class="btn-add-custom" id="libAddExerciseBtn">➕ Add from Library</button>
+      </div>
+
+      <div class="day-log-section-title" style="margin-top:1rem;">✍️ Or add custom exercise</div>
+      <div class="free-add-row">
+        <div class="field" style="flex:2 1 200px;">
+          <label for="freeExName">Custom exercise name</label>
+          <input type="text" id="freeExName" placeholder="e.g. Bench Press, Squat, Run 5km" autocomplete="off">
+        </div>
+        <button class="btn-add-custom" id="freeAddBtn">➕ Add</button>
+      </div>
+      <div id="libraryQuickChips" class="library-quick-chips"></div>
+        </div><!-- /add-exercise-body -->
+      </div><!-- /add-exercise-box -->
+      <div class="modal-actions">
+        <button class="btn-secondary" id="closeDayLogBtn" style="width:100%;">Close</button>
+      </div>
+      <div id="dayLogStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<div id="monthSummaryModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header blue"><h3>📅 Month Summary</h3><p id="monthSummarySubtitle">—</p></div>
+    <div class="modal-body">
+      <div id="monthSummaryContent"></div>
+      <div class="modal-actions" style="margin-top:1rem;">
+        <button class="btn-secondary" id="closeMonthSummaryBtn" style="width:100%;">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="setTimeModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header orange"><h3>⏰ Set Time for a Day</h3><p id="setTimeDateLabel">—</p></div>
+    <div class="modal-body">
+      <input type="hidden" id="stDayDate">
+      <div class="input-group"><label for="stTime">Class time *</label><input type="time" id="stTime"></div>
+      <div class="input-group"><label for="stNote">Note (optional)</label><input type="text" id="stNote" placeholder="e.g., Bring water bottle"></div>
+      <div class="modal-actions">
+        <button class="btn-admin" id="saveSetTimeBtn">💾 Save Time</button>
+        <button class="btn-secondary" id="clearSetTimeBtn" style="background:#ffebee;border-color:#ef9a9a;color:#c62828;">🗑️ Clear</button>
+        <button class="btn-secondary" id="cancelSetTimeBtn">Cancel</button>
+      </div>
+      <div id="setTimeStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<div id="exerciseModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header purple"><h3 id="exerciseModalTitle">➕ Add Exercise</h3></div>
+    <div class="modal-body">
+      <input type="hidden" id="editExerciseId">
+      <div class="flex-row">
+        <div class="input-group" style="flex:2 1 200px;"><label for="exName">Name *</label><input type="text" id="exName"></div>
+        <div class="input-group" style="flex:1 1 120px;"><label for="exCategory">Category</label><input type="text" id="exCategory"></div>
+        <div class="input-group" style="flex:1 1 120px;"><label for="exMuscle">Muscle</label><input type="text" id="exMuscle"></div>
+      </div>
+      <div class="flex-row">
+        <div class="input-group" style="flex:1 1 100px;"><label for="exSets">Sets</label><input type="number" id="exSets" min="1"></div>
+        <div class="input-group" style="flex:1 1 100px;"><label for="exReps">Reps</label><input type="text" id="exReps"></div>
+        <div class="input-group" style="flex:1 1 100px;"><label for="exWeight">Weight</label><input type="text" id="exWeight"></div>
+        <div class="input-group" style="flex:1 1 100px;"><label for="exRest">Rest</label><input type="text" id="exRest"></div>
+      </div>
+      <div class="input-group"><label for="exNotes">Notes</label><input type="text" id="exNotes"></div>
+      <div class="modal-actions"><button class="btn-admin" id="saveExerciseBtn">💾 Save</button><button class="btn-secondary" id="cancelExerciseBtn">Cancel</button></div>
+      <div id="exerciseModalStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<div id="clearAllModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header red"><h3>⚠️ Email & Wipe All Data</h3><p>Full report will be emailed, then everything deleted.</p></div>
+    <div class="modal-body">
+      <div class="modal-warning" style="background:#ffebee;border-left-color:#c62828;color:#7f1d1d;">
+        <strong>🚨 Cannot be undone.</strong><br>
+        1. A full data report will be sent to <strong id="wipeArchiveEmailDisplay">—</strong>.<br>
+        2. Your mail app opens — click <strong>Send</strong>.<br>
+        3. Then <strong>everything is deleted automatically</strong> (3 seconds later).
+      </div>
+      <div class="input-group"><label for="clearConfirmInput">Type DELETE to enable</label><input type="text" id="clearConfirmInput" autocomplete="off"></div>
+      <div class="modal-actions"><button class="btn-danger" id="confirmClearAllBtn" disabled>📧 Email & Wipe</button><button class="btn-secondary" id="cancelClearAllBtn">Cancel</button></div>
+      <div id="clearAllStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<div id="deleteClientModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header red"><h3>🗑️ Delete Client</h3></div>
+    <div class="modal-body">
+      <div class="modal-warning" style="background:#ffebee;border-left-color:#c62828;color:#7f1d1d;"><strong>🚨 Permanent:</strong> All data gone forever.</div>
+      <div class="input-group"><label for="deleteConfirmInput">Type DELETE</label><input type="text" id="deleteConfirmInput"></div>
+      <div class="modal-actions"><button class="btn-danger" id="confirmDeleteClientBtn" disabled>🗑️ Delete</button><button class="btn-secondary" id="cancelDeleteClientBtn">Cancel</button></div>
+      <div id="deleteClientStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ➕ Progress modal & ✏️ Edit Profile modal moved OUT of #adminDashboard — they are shared by the client portal too -->
+
+
+
+<div id="progressModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header green"><h3 id="progressModalTitle">➕ Add Progress</h3></div>
+    <div class="modal-body">
+      <input type="hidden" id="editProgressId">
+      <!-- Compact grid: multi-column on laptop, 2 columns on phone -->
+      <div class="pg-grid">
+        <div class="input-group"><label for="pgDate">Date</label><input type="date" id="pgDate"></div>
+        <div class="input-group"><label for="pgWeight">Weight (kg)</label><input type="number" id="pgWeight" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgBodyFat">Body fat %</label><input type="number" id="pgBodyFat" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgChest">Chest (cm)</label><input type="number" id="pgChest" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgWaist">Waist (cm)</label><input type="number" id="pgWaist" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgHips">Hips (cm)</label><input type="number" id="pgHips" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgArms">Arms (cm)</label><input type="number" id="pgArms" step="0.1" inputmode="decimal"></div>
+        <div class="input-group"><label for="pgThighs">Thighs (cm)</label><input type="number" id="pgThighs" step="0.1" inputmode="decimal"></div>
+        <div class="input-group pg-span-2"><label for="pgPhoto">Photo URL / Drive ID (optional)</label><input type="text" id="pgPhoto"></div>
+        <div class="input-group pg-span-2"><label for="pgNotes">Notes (optional)</label><input type="text" id="pgNotes"></div>
+      </div>
+      <div class="modal-actions"><button class="btn-admin" id="saveProgressBtn">💾 Save</button><button class="btn-secondary" id="cancelProgressBtn">Cancel</button></div>
+      <div id="progressModalStatus" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+<!-- ✏️ EDIT PROFILE modal was REMOVED (duplicate form): every field it
+     contained — Height / Gender / Birth date / Goal / Medical notes /
+     Emergency contact AND the 11 📌 Shared Inputs (Weight, Height, Age,
+     Gender, Activity Level, Goal, Waist, Neck, Hip, Bench Press, Body Fat %)
+     is now edited directly inside 👤 My Profile below. All of those items
+     are merged into ONE single form that is sent for trainer approval at
+     once with the "📩 Save to Profile" button (js/progress.js →
+     renderClientProfile + submitProfileFromView). The old pcWeight/peHeight
+     ids no longer exist anywhere. -->
+
+<!-- 🔄 WEEKLY PROFILE UPDATE REMINDER — auto popup (js/progress.js).
+     Shows once every 7 days for signed-in clients that already have an
+     APPROVED profile, asking them to review & re-submit their details so
+     all 15 calculators regenerate from fresh data. On the trainer's NEXT
+     approval the previous approved data is archived into 📈 Progress
+     automatically (snapshot-on-re-approval in js/approvals.js). -->
+<!-- ✨ DAILY MOTIVATION POPUP (js/tools.js) — shows once per calendar day,
+     right after a client logs in for the first time that day. Quote rotates
+     daily; "🔄 Another one" shuffles without closing. -->
+<div id="motivationModal" class="modal-overlay hidden">
+  <div class="modal-box motivation-box">
+    <div class="modal-header green">
+      <h3>✨ Your Daily Motivation</h3>
+      <p>A fresh boost for today — makes you strong</p>
+    </div>
+    <div class="modal-body">
+      <button class="panel-close-x" type="button" id="motCloseX" aria-label="Close">✕</button>
+      <div class="mot-emoji" aria-hidden="true">🔥</div>
+      <div class="mot-quote" id="motQuoteText">Loading…</div>
+      <div class="mot-date" id="motDateLabel"></div>
+      <div class="modal-actions mot-actions">
+        <button type="button" class="chip-btn" id="motNextBtn">🔄 Another one</button>
+        <button type="button" class="btn-primary" id="motStartBtn">💪 Let's do this today!</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="weeklyProfileModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header orange">
+      <h3>🔄 Time to update your profile!</h3>
+      <p>Weekly check-in — keep your numbers fresh</p>
+    </div>
+    <div class="modal-body">
+      <button class="panel-close-x" type="button" id="wprCloseX" aria-label="Close">✕</button>
+      <p style="font-size:0.88rem;line-height:1.6;margin:0 0 0.6rem;">
+        It has been <strong>a week</strong> since your profile was last approved. Your weight, measurements and goals change over time — and <strong>all 15 calculators run on these approved values</strong>.
+      </p>
+      <ul style="font-size:0.84rem;line-height:1.7;margin:0 0 0.8rem;padding-left:1.2rem;color:var(--text);">
+        <li>Open <strong>👤 My Profile</strong>, review 👤 Basic Details + 📌 Shared Inputs.</li>
+        <li>Update anything that changed and press <strong>“📩 Save to Profile”</strong>.</li>
+        <li>Your trainer approves it → calculators regenerate with the new data.</li>
+        <li>The previous approved snapshot is saved automatically in <strong>📈 Progress</strong>.</li>
+      </ul>
+      <div class="modal-actions">
+        <button type="button" class="btn-admin" id="wprUpdateBtn">📝 Update my profile now</button>
+        <button type="button" class="btn-secondary" id="wprLaterBtn">⏰ Remind me later</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /unified-wrap -->
+
+<!-- ===== Footer: professional compact layout (brand + nav columns + legal bar) ===== -->
+<footer class="app-footer">
+  <div class="footer-top">
+    <div class="footer-brand-col">
+      <span class="app-footer-brand"><svg class="footer-logo" viewBox="0 0 236 64" role="img" aria-label="TAS Personal Training">
+        <!-- self-contained lockup: renders identically in every theme (no white-on-white) -->
+        <defs>
+          <linearGradient id="tasFooterMarkG" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#1f4e3d"/><stop offset="1" stop-color="#38826a"/>
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="15" fill="url(#tasFooterMarkG)"/>
+        <g stroke="#ffffff" stroke-width="4.6" stroke-linecap="round" fill="#ffffff">
+          <line x1="22" y1="20" x2="42" y2="20"/>
+          <rect x="13.5" y="13.5" width="7" height="13" rx="2.4" stroke="none"/>
+          <rect x="43.5" y="13.5" width="7" height="13" rx="2.4" stroke="none"/>
+        </g>
+        <text x="32" y="49" text-anchor="middle" font-family="Sora, Inter, Arial, sans-serif" font-weight="800" font-size="17" letter-spacing="1" fill="#ffffff">TAS</text>
+        <text x="78" y="30" font-family="Sora, Inter, Arial, sans-serif" font-weight="800" font-size="22" letter-spacing="-0.5" fill="#143d2c">TAS</text>
+        <text x="78" y="50" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="13" letter-spacing="0.2" fill="#143d2c" opacity="0.75">Personal Training</text>
+      </svg></span>
+      <p class="footer-tagline">Certified personal training in Dubai — customised plans, progress tracking and 1-on-1 coaching in one portal.</p>
+      <a class="footer-follow-link" href="https://www.instagram.com/teamabhisutaria?stkn=d2FoMmxiZ3A2eXhz" target="_blank" rel="noopener noreferrer">Follow @teamabhisutaria for daily workouts &amp; client results →</a>
+      <div class="admin-contact footer-contact" id="footerAdminContact">
+        <div class="admin-contact-title">Need help? Contact the admin</div>
+        <div class="admin-contact-row">
+          <a class="btn-contact-email" href="mailto:sutariaabhi98@gmail.com" title="Email the admin">✉️ Email</a>
+          <a class="btn-contact-instagram" href="https://www.instagram.com/teamabhisutaria?stkn=d2FoMmxiZ3A2eXhz" target="_blank" rel="noopener noreferrer" title="Admin on Instagram">@teamabhisutaria</a>
+          <a class="btn-contact-whatsapp" href="https://wa.me/971521391505" target="_blank" rel="noopener noreferrer" title="WhatsApp the admin: +971 52 139 1505">📱 WhatsApp</a>
+        </div>
+      </div>
+    </div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <div class="footer-col">
+        <h4>Quick Links</h4>
+        <a href="#loginCard" data-scroll>🔐 Login</a>
+        <!-- The old 👤 My Profile / 📈 Log Progress / 📝 Log Session /
+             ⚙️ Settings links were hidden until login and did nothing for
+             logged-out visitors — removed so every Quick Link works for
+             everyone. In-app actions remain available inside the dashboards. -->
+        <a href="https://www.instagram.com/teamabhisutaria?stkn=d2FoMmxiZ3A2eXhz" target="_blank" rel="noopener noreferrer">🏋️ Coach on Instagram</a>
+      </div>
+      <div class="footer-col footer-col-legal">
+        <h4>Legal</h4>
+        <a href="#" data-open-modal="privacyModal">🔒 Privacy Policy</a>
+        <a href="#" data-open-modal="termsModal">📄 Terms of Use</a>
+        <a href="mailto:sutariaabhi98@gmail.com">✉️ Data Requests</a>
+      </div>
+      <div class="footer-col">
+        <h4>Contact</h4>
+        <a href="mailto:sutariaabhi98@gmail.com">✉️ sutariaabhi98@gmail.com</a>
+        <a href="https://wa.me/971521391505" target="_blank" rel="noopener noreferrer">📱 +971 52 139 1505</a>
+        <a href="https://www.instagram.com/teamabhisutaria?stkn=d2FoMmxiZ3A2eXhz" target="_blank" rel="noopener noreferrer">📸 @teamabhisutaria</a>
+        <span class="footer-hours">🕐 Daily, 6:00 – 22:00 (GST)</span>
+      </div>
+    </nav>
+  </div>
+  <div class="footer-bottom">
+    <span class="app-footer-copy"><span id="footerAppUrl" title="Portal link sent in WhatsApp messages">—</span> · © <span id="footerYear">2026</span> Team Abhi Sutaria · Dubai, UAE · All rights reserved</span>
+  </div>
+</footer>
+
+<!-- ===== Footer modals (Privacy / Terms) live AFTER </footer> on purpose.
+     The main page content sits inside .unified-wrap; keeping these overlays
+     outside that wrapper guarantees they are never clipped or blocked by any
+     ancestor styling, so the footer's Privacy Policy / Terms of Use links
+     open correctly whether logged out or logged in. They are
+     position:fixed, so they still cover the viewport from here. -->
+<div id="privacyModal" class="modal-overlay hidden">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="privacyModalTitle">
+    <h3 id="privacyModalTitle">🔒 Privacy Policy</h3>
+    <p class="modal-subhead">Last updated: October 2026 · Team Abhi Sutaria — Personal Training, Dubai, UAE</p>
+    <div class="legal-body">
+      <p><strong>What we collect.</strong> Your name, contact details (phone/email), gender, birth date, training goal, medical notes and an emergency contact — plus your session attendance, exercise logs, measurements and progress photos. Nothing else; the portal shows no ads and uses no tracking cookies.</p>
+      <p><strong>Why we collect it.</strong> Solely to plan and deliver your personal-training programme, track your progress, send session reminders/reports you opt into, and meet safety obligations. Medical notes are used only to keep your training safe.</p>
+      <p><strong>Who sees it.</strong> Only you and the head coach (admin). Data is stored in our private cloud database (Supabase) with per-user access control; progress media is served through private Google Drive links that only authenticated users of this portal can open.</p>
+      <p><strong>Sharing &amp; messaging.</strong> Session links and reminders are sent to you over WhatsApp/email at your request. We never sell or rent your data, and we share it with no third parties for marketing.</p>
+      <p><strong>Retention &amp; deletion.</strong> Records are kept while you are an active client. You may ask the admin at any time to export or permanently delete your data — requests are actioned within 7 days.</p>
+      <p><strong>Security.</strong> Password-protected login, HTTPS-only transport and least-privilege access. You are responsible for keeping your login credentials confidential.</p>
+      <p><strong>Questions?</strong> Email <a href="mailto:sutariaabhi98@gmail.com">sutariaabhi98@gmail.com</a> or message the admin on WhatsApp (+971 52 139 1505).</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="closePrivacyBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="termsModal" class="modal-overlay hidden">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="termsModalTitle">
+    <h3 id="termsModalTitle">📄 Terms of Use</h3>
+    <p class="modal-subhead">Effective October 2026 · Team Abhi Sutaria — Personal Training, Dubai, UAE</p>
+    <div class="legal-body">
+      <p><strong>1. The portal.</strong> This app is a private training workspace for registered clients of Team Abhi Sutaria. Your login (client ID + password) is personal — do not share it. Accounts are created and approved by the admin.</p>
+      <p><strong>2. Acceptable use.</strong> Use the portal only to view your plan, log your progress and communicate about sessions. Uploading false data, attempting to access other users' records, or misusing reminder/report features may lead to suspension.</p>
+      <p><strong>3. Training guidance.</strong> Workouts, nutrition hints and reports are general guidance from your coach for your stated goal and disclosed conditions. They are not medical advice. Consult your physician before starting any programme, stop any exercise that causes pain, and keep your medical notes up to date.</p>
+      <p><strong>4. Sessions, booking &amp; cancellations.</strong> Booked times shown in the portal are confirmed slots. Please give at least 12 hours' notice to cancel or reschedule; late cancellations/no-shows may be counted against your package as agreed with your coach.</p>
+      <p><strong>5. Payments.</strong> Fees, packages and rates are as agreed privately with the admin (see the rate shown in your dashboard). This portal itself does not process payments.</p>
+      <p><strong>6. Your content.</strong> Progress photos and logs you submit remain yours; you grant the coach permission to store and use them solely to track and deliver your training.</p>
+      <p><strong>7. Availability &amp; changes.</strong> We aim for high uptime but the portal is provided "as is"; features may evolve and scheduled maintenance may occur. Material changes to these terms will be announced in the portal.</p>
+      <p><strong>8. Governing law.</strong> These terms are governed by the laws of the United Arab Emirates (Dubai jurisdiction).</p>
+      <p>Contact for any term-related question: <a href="mailto:sutariaabhi98@gmail.com">sutariaabhi98@gmail.com</a> · WhatsApp +971 52 139 1505.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="closeTermsBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastContainer" role="status" aria-live="polite"></div>
+
+<script src="js/config.js"></script>
+<script src="js/drive-images.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/toast.js"></script>
+<script src="js/state.js"></script>
+<script src="js/exercise-library.js"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/realtime.js"></script>
+<script src="js/report.js"></script>
+<script src="js/contacts.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/sessions.js"></script>
+<script src="js/exercises.js"></script>
+<script src="js/progress.js"></script>
+<!-- 🧮 Fitness Calculator Hub — 15 calculators driven by ONE shared input
+     panel (client tab + admin workspace tab). Saves to Supabase table
+     fitness_inputs; run sql/fitness_calculator.sql once before deploying. -->
+<script src="js/calculators.js"></script>
+<!-- 📨 The client "My Requests" feature and js/client-requests.js were
+     removed entirely (tab, modal, approvals list, data loading). -->
+<script src="js/class-times.js"></script>
+<script src="js/approvals.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/reminders.js"></script>
+<script src="js/clients.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/reports.js"></script>
+<script src="js/workspace.js"></script>
+<script src="js/wipe.js"></script>
+<script src="js/update-site.js"></script>
+<script src="js/pwa.js"></script>
+<!-- 👤 Client portal robust wiring (Edit Profile / Add Entry) + 📄 Calculator PDF export -->
+<script src="js/client-portal.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/main.js"></script>
+
+<script>
+/* ---- Footer navigation (Privacy / Terms / Quick Links) ----
+   Wired here because the footer markup ships with index.html;
+   all lookups are guarded so nothing breaks if an element is absent.
+
+   WHY SOME FOOTER LINKS DIDN'T WORK: the privacy/terms modals used to
+   sit deep inside .unified-wrap alongside the app cards, where ancestor
+   layout/stacking could clip or block them — so their footer links did
+   nothing while "🔐 Login" (a plain scroll link) appeared to be the only
+   one that worked. The modals now live right after </footer>, outside
+   that wrapper, and every footer link is handled robustly below. */
+(function () {
+  // Open a modal-overlay OR an admin panel (settingsPanel uses .hidden too).
+  function openFooterTarget(id) {
+    var el = document.getElementById(id);
+    var S = window.APP_STATE || {};
+    if (id === 'profileEditModal') {
+      // ✏️ Edit Profile modal was merged INTO 👤 My Profile — the element
+      // no longer exists. BUG FIX: the old code bailed out on the missing
+      // element above, so the footer quick-link was dead. Route to the
+      // Profile tab instead (same behaviour as window.tasOpenProfileEdit).
+      if (typeof window.tasOpenProfileEdit === 'function') { window.tasOpenProfileEdit(); return; }
+      var tabBtn = document.querySelector('.tab-btn[data-ctab="profile"]');
+      if (tabBtn) tabBtn.click();
+      return;
+    }
+    if (!el) return;
+    if (el.id === 'progressModal') {
+      // Same entry point the "Add My Progress" button uses.
+      if (typeof window.openProgressModal === 'function' && S.loggedInClient) {
+        window.openProgressModal(null, S.loggedInClient.id, 'client');
+      }
+    } else if (el.id === 'dayLogModal') {
+      if (typeof window.openDayLogModal === 'function') {
+        window.openDayLogModal(S.selectedDay || new Date().getDate());
+      }
+    } else if (el.id === 'settingsPanel') {
+      if (S.selectedClientId && typeof window.openSettingsForClient === 'function') {
+        window.openSettingsForClient(S.selectedClientId);
+      } else {
+        el.classList.remove('hidden');
+      }
+    } else {
+      el.classList.remove('hidden');
+    }
+  }
+
+  // Show/hide role-gated quick links ('admin' | 'client' | null). Kept for
+  // backward compatibility (auth.js calls it on login/logout); the current
+  // footer has no [data-logged] links, so this is a safe no-op for them.
+  window.refreshFooterNav = function (role) {
+    document.querySelectorAll('.footer-nav [data-logged]').forEach(function (a) {
+      a.style.display = (a.getAttribute('data-logged') === role) ? '' : 'none';
+    });
+    var loginLink = document.querySelector('.footer-nav a[data-scroll]');
+    if (loginLink) loginLink.style.display = role ? 'none' : '';
+  };
+
+  // Robust click handling for EVERY footer link — bound directly to the
+  // <a> elements (not just via delegation), and also delegated as a safety
+  // net for clicks that land on child nodes:
+  //   • data-open-modal → open the matching overlay/panel
+  //   • data-scroll     → smooth-scroll to the target id
+  //   • plain "#"/javascript links → never jump the page to the top
+  // External links (Instagram / mailto: / wa.me) keep native behaviour.
+  function wireFooterLinks() {
+    document.querySelectorAll('.footer-nav a').forEach(function (link) {
+      if (link.dataset.footerWired === '1') return;
+      link.dataset.footerWired = '1';
+      link.addEventListener('click', function (e) {
+        var modalId = link.getAttribute('data-open-modal');
+        if (modalId) { e.preventDefault(); openFooterTarget(modalId); return; }
+        if (link.hasAttribute('data-scroll')) {
+          e.preventDefault();
+          var t = document.getElementById((link.getAttribute('href') || '').replace('#', ''));
+          if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        var href = link.getAttribute('href') || '';
+        if (href === '#' || href === '' || /^javascript:/i.test(href)) e.preventDefault();
+      });
+    });
+  }
+  wireFooterLinks();
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest ? e.target.closest('.footer-nav a') : null;
+    if (!link) return;
+    var modalId = link.getAttribute('data-open-modal');
+    if (modalId) { e.preventDefault(); openFooterTarget(modalId); return; }
+    if (link.hasAttribute('data-scroll')) {
+      e.preventDefault(); // stop '#' links from jumping the page to the top on phones
+      var t = document.getElementById((link.getAttribute('href') || '').replace('#', ''));
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    var href = link.getAttribute('href') || '';
+    if (href === '#' || href === '' || /^javascript:/i.test(href)) e.preventDefault();
+  });
+
+  // Close buttons + backdrop click for the legal modals
+  [['closePrivacyBtn', 'privacyModal'], ['closeTermsBtn', 'termsModal']].forEach(function (p) {
+    var btn = document.getElementById(p[0]);
+    if (btn) btn.addEventListener('click', function () {
+      var m = document.getElementById(p[1]);
+      if (m) m.classList.add('hidden');
+    });
+  });
+  ['privacyModal', 'termsModal'].forEach(function (id) {
+    var m = document.getElementById(id);
+    if (m) m.addEventListener('click', function (e) { if (e.target === m) m.classList.add('hidden'); });
+  });
+})();
+</script>
+
+
+</body>
+</html>

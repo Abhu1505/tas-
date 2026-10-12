@@ -1,0 +1,24 @@
+{
+  "name": "TAS Personal Training — Client & Trainer Portal",
+  "short_name": "TAS Training",
+  "description": "Professional personal training portal: session tracking, exercise library, progress analytics and approvals.",
+  "id": "./",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#eef4f9",
+  "theme_color": "#1f4e3d",
+  "categories": ["health", "fitness", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Client login", "short_name": "Client", "url": "./index.html#client", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Trainer dashboard", "short_name": "Trainer", "url": "./index.html#trainer", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
