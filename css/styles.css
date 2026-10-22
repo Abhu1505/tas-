@@ -247,6 +247,74 @@ button:disabled{opacity:0.55;cursor:not-allowed;}
 .tab-btn.active{background:var(--surface);color:var(--brand-700);box-shadow:var(--shadow-sm);}
 .tab-content.hidden{display:none;}
 
+/* ============================================================
+   SCREEN / TAB TRANSITION ANIMATIONS
+   Every "screen" (tab content, admin workspace, slide-in panel)
+   animates in when it becomes visible. The .hidden class removes
+   the element from the layout, so toggling it off automatically
+   re-triggers these entry animations — no JS needed for that part.
+   Direction-aware variants (.slide-from-left / .slide-from-right)
+   are applied by js/animations.js based on tab order.
+   ============================================================ */
+@keyframes screenIn{from{opacity:0;transform:translateY(12px) scale(.995);}to{opacity:1;transform:none;}}
+@keyframes screenInLeft{from{opacity:0;transform:translateX(-20px);}to{opacity:1;transform:none;}}
+@keyframes screenInRight{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:none;}}
+
+.tab-content:not(.hidden){animation:screenIn .3s var(--ease) both;}
+.tab-content.slide-from-left:not(.hidden){animation:screenInLeft .28s var(--ease) both;}
+.tab-content.slide-from-right:not(.hidden){animation:screenInRight .28s var(--ease) both;}
+
+.admin-workspace:not(.hidden){animation:screenIn .34s var(--ease) both;}
+
+/* Staggered entrance for the main content blocks inside a screen —
+   cards/sections rise one after another instead of all at once.
+   Only applied when JS is active (html.js-anim is set by js/animations.js)
+   so content can never end up invisible if the script fails to load. */
+@keyframes staggerUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+.js-anim .tab-content:not(.hidden) > *,
+.js-anim .admin-workspace:not(.hidden) > *{
+  animation:staggerUp .4s var(--ease) both;
+}
+.js-anim .tab-content:not(.hidden) > :nth-child(2){animation-delay:.06s;}
+.js-anim .tab-content:not(.hidden) > :nth-child(3){animation-delay:.12s;}
+.js-anim .tab-content:not(.hidden) > :nth-child(4){animation-delay:.18s;}
+.js-anim .tab-content:not(.hidden) > :nth-child(n+5){animation-delay:.24s;}
+.js-anim .admin-workspace:not(.hidden) > :nth-child(2){animation-delay:.06s;}
+.js-anim .admin-workspace:not(.hidden) > :nth-child(3){animation-delay:.12s;}
+.js-anim .admin-workspace:not(.hidden) > :nth-child(n+4){animation-delay:.18s;}
+
+/* Sliding pill indicator behind the active tab button (injected by
+   js/animations.js). Sits under the buttons, follows .active smoothly. */
+.tabs-bar{position:relative;}
+.tabs-indicator{position:absolute;top:0.35rem;left:0;height:calc(100% - 0.7rem);
+  border-radius:var(--r-sm);background:var(--surface);box-shadow:var(--shadow-sm);
+  transition:transform .3s var(--ease),width .3s var(--ease),opacity .2s ease;
+  pointer-events:none;z-index:0;opacity:0;}
+[data-theme="dark"] .tabs-indicator{background:#1c3145;}
+.tabs-bar .tab-btn{position:relative;z-index:1;}
+.tabs-bar:not(.client-tabs) .tab-btn.active{background:transparent;box-shadow:none;}
+@media (max-width:700px){
+  /* Phone dock tabs are full-width equal pills — a gliding pill would be
+     pointless there, so keep each active button's own highlight instead. */
+  .client-tabs .tabs-indicator{display:none;}
+}
+
+/* Hover lift on interactive rows/cards (buttons keep their own press fx) */
+.client-item:hover,.history-item:hover,.session-card:hover,.library-row:hover,.plan-card:hover{
+  transform:translateY(-1px);}
+.stat-tile:hover{transform:translateY(-2px);}
+
+/* Reduced motion: kill every new transition animation too */
+@media (prefers-reduced-motion:reduce){
+  .tab-content:not(.hidden),.tab-content.slide-from-left:not(.hidden),.tab-content.slide-from-right:not(.hidden),
+  .admin-workspace:not(.hidden),
+  .js-anim .tab-content:not(.hidden) > *,.js-anim .admin-workspace:not(.hidden) > *{
+    animation:none !important;
+  }
+  .tabs-indicator{transition:none;}
+  .client-item:hover,.history-item:hover,.session-card:hover,.library-row:hover,.plan-card:hover,.stat-tile:hover{transform:none;}
+}
+
 .reminder-section{background:linear-gradient(135deg,var(--brand-50),#eafaf3);border-radius:var(--r-lg);padding:1.1rem 1.2rem;border:1.5px solid var(--success-border);margin-bottom:1.2rem;}
 .reminder-section h4{font-size:0.95rem;font-weight:800;color:var(--brand-700);margin-bottom:0.8rem;line-height:1.3;}
 .reminder-preview{background:var(--surface);border-radius:var(--r-md);padding:0.9rem 1rem;border:1.5px dashed var(--brand-300);font-size:0.82rem;color:var(--ink-soft);line-height:1.6;margin:0.8rem 0;white-space:pre-wrap;font-family:var(--font-mono);max-height:260px;overflow-y:auto;word-break:break-word;}
