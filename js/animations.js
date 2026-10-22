@@ -11,6 +11,15 @@
 //     create-client tabs and the approvals filter chips).
 //   • A sliding pill indicator that glides behind the active tab
 //     button in every .tabs-bar.
+//   • SITE-WIDE reveal tracking — a MutationObserver watches the
+//     .hidden class on every screen-like container (dashboards,
+//     login card, settings/approvals/library/reports/class-times
+//     panels, client detail panel, modals, workspaces and tab
+//     contents). Whenever one becomes visible it gets a temporary
+//     .anim-in tag, which triggers its entry animation AND makes
+//     freshly rendered lists inside it (client rows, history
+//     items, session cards, stat tiles…) cascade in one by one.
+//   • Late-rendered data (after async loads) pops in via .anim-pop.
 // Everything here is defensive: if any element is missing or an
 // error occurs, the app keeps working with plain CSS behaviour.
 // ============================================================
@@ -156,6 +165,115 @@
     document.querySelectorAll('.tabs-bar').forEach(moveIndicator);
   }, true);
 
+  // ---- Site-wide reveal tracking (MutationObserver) -----------------
+  // Every "screen-like" container in the app is shown/hidden by
+  // toggling the .hidden class. We watch those class changes and tag
+  // a freshly-revealed container with .anim-in for ~1s. The CSS then:
+  //   • plays that container's entry animation (panel drop, modal
+  //     spring, dashboard rise, login pop…), and
+  //   • cascades the repeated children inside it (client rows,
+  //     history items, session cards, stat tiles…) one after another.
+  var SCREEN_SELECTOR = [
+    '.dash-card', '#loginCard', '.login-card', '.modal-overlay', '.settings-panel',
+    '.client-detail-panel', '.admin-workspace', '.tab-content'
+  ].join(',');
+
+  function markRevealed(el) {
+    if (!el || reduced) return;
+    try {
+      el.classList.remove('anim-in');
+      void el.offsetWidth;              // restart the CSS animation
+      el.classList.add('anim-in');
+      setTimeout(function () { el.classList.remove('anim-in'); }, 1000);
+    } catch (e) {}
+  }
+
+  function handleHiddenFlip(m) {
+    try {
+      var el = m.target;
+      if (!el.classList || typeof el.matches !== 'function') return;
+      if (!el.matches(SCREEN_SELECTOR)) return;
+      var nowHidden = el.classList.contains('hidden');
+      var wasHidden = (m.oldValue || '').indexOf('hidden') !== -1;
+      if (!nowHidden && wasHidden) markRevealed(el);   // hidden → visible
+    } catch (e) {}
+  }
+
+  function startObserver() {
+    try {
+      if (typeof MutationObserver === 'undefined') return;
+      var mo = new MutationObserver(function (list) {
+        for (var i = 0; i < list.length; i++) handleHiddenFlip(list[i]);
+      });
+      mo.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+        attributeOldValue: true,
+        subtree: true
+      });
+    } catch (e) {}
+  }
+
+  // ---- Pop-in for late-rendered data --------------------------------
+  // When async loads finish (dashboard stats, client lists, reports),
+  // their containers are already visible, so no .anim-in fires. Watch
+  // for element insertions into known data containers and give each
+  // new batch a single soft pop (never per-item — avoids flicker on
+  // frequent re-renders).
+  var POP_TARGETS = [
+    'homeStatsRow', 'clientStatGrid', 'clientListContainer', 'approvalsList',
+    'libraryList', 'assignList', 'clientHistoryList', 'clientPlanList',
+    'clientProgressList', 'adminProgressList', 'clientUpcomingList',
+    'clientInsightKpis', 'reportsPanel', 'monthSummaryContent',
+    'insightSummary', 'progressDashboardContainer',
+    // Additional live-data containers so every async render animates.
+    'notifList', 'notificationList', 'reminderPreview', 'sessionList',
+    'classTimesList', 'contactList', 'toolsResults', 'rpReportArea',
+    'exerciseList', 'dashboardClients', 'weeklyChart', 'caloriesResult',
+    'bmrResult', 'bodyfatResult'
+  ];
+  var popTimers = {};
+  function schedulePop(id) {
+    if (reduced || popTimers[id]) return;
+    popTimers[id] = setTimeout(function () {
+      popTimers[id] = null;
+      try {
+        var el = document.getElementById(id);
+        if (!el || el.classList.contains('hidden')) return;
+        el.classList.remove('anim-pop');
+        void el.offsetWidth;
+        el.classList.add('anim-pop');
+        setTimeout(function () { el.classList.remove('anim-pop'); }, 700);
+      } catch (e) {}
+    }, 60);
+  }
+
+  function startPopObserver() {
+    try {
+      if (typeof MutationObserver === 'undefined') return;
+      var mo = new MutationObserver(function (list) {
+        for (var i = 0; i < list.length; i++) {
+          var added = list[i].addedNodes;
+          if (!added || !added.length) continue;
+          var parent = list[i].target;
+          // walk up to find which watched container this belongs to
+          for (var node = parent; node; node = node.parentNode) {
+            if (node.id && POP_TARGETS.indexOf(node.id) !== -1) { schedulePop(node.id); break; }
+            if (node === document.body) break;
+          }
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch (e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      startObserver(); startPopObserver(); ensureIndicators();
+    });
+  } else {
+    startObserver(); startPopObserver();
+  }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ensureIndicators);
   } else {

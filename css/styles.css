@@ -304,14 +304,188 @@ button:disabled{opacity:0.55;cursor:not-allowed;}
   transform:translateY(-1px);}
 .stat-tile:hover{transform:translateY(-2px);}
 
+/* ============================================================
+   SITE-WIDE ANIMATION LAYER (driven by js/animations.js)
+   The script tags the <html> with .js-anim and marks freshly
+   revealed containers with .anim-in, so these rules animate
+   EVERY screen-like surface of the app — not just tabs:
+     • slide-down panels (Approvals, Settings, Library, Reports,
+       Class Times, client detail card)
+     • login card + both dashboards (login → dashboard "screen"
+       change, logout → login change)
+     • every modal (overlay cross-fade + box pop/spring)
+     • toasts (spring slide-in from the right)
+     • dynamically rendered lists & grids (client rows, history
+       items, session cards, stat tiles, library rows, plan
+       cards…) cascade in one after another when their screen
+       appears or when data loads.
+   All guarded by .js-anim → nothing can stay invisible if the
+   script fails to load, and everything is disabled under
+   prefers-reduced-motion.
+   ============================================================ */
+
+/* ---- Panels that slide down/open inside a screen ---- */
+@keyframes panelDropIn{from{opacity:0;transform:translateY(-14px) scale(.985);}to{opacity:1;transform:none;}}
+.anim-in.settings-panel,.anim-in.client-detail-panel{animation:panelDropIn .3s var(--ease) both;}
+/* stagger the blocks inside those panels too */
+.js-anim .anim-in.settings-panel > *,
+.js-anim .anim-in.client-detail-panel > *{animation:staggerUp .36s var(--ease) both;}
+.js-anim .anim-in.settings-panel > :nth-child(2),
+.js-anim .anim-in.client-detail-panel > :nth-child(2){animation-delay:.05s;}
+.js-anim .anim-in.settings-panel > :nth-child(3),
+.js-anim .anim-in.client-detail-panel > :nth-child(3){animation-delay:.1s;}
+.js-anim .anim-in.settings-panel > :nth-child(n+4),
+.js-anim .anim-in.client-detail-panel > :nth-child(n+4){animation-delay:.15s;}
+
+/* ---- Login ⇄ Dashboard big screen transitions ---- */
+.anim-in.dash-card{animation:dashIn .45s var(--ease) both;}
+.anim-in.login-card{animation:loginPopIn .5s cubic-bezier(.22,1.15,.36,1) both;}
+@keyframes loginPopIn{from{opacity:0;transform:translateY(18px) scale(.97);}to{opacity:1;transform:none;}}
+
+/* ---- Modals: crisper overlay fade + springy box entrance ---- */
+@keyframes overlayInFx{from{opacity:0;}to{opacity:1;}}
+@keyframes modalSpringIn{from{opacity:0;transform:translateY(26px) scale(.94);}
+  60%{opacity:1;transform:translateY(-3px) scale(1.012);}to{transform:none;}}
+.anim-in.modal-overlay{animation:overlayInFx .2s ease both;}
+.anim-in.modal-overlay .modal-box{animation:modalSpringIn .34s cubic-bezier(.22,1.15,.36,1) both;}
+
+/* ---- Toasts: springy arrival, quick exit ---- */
+.js-anim .toast{transition:transform .38s cubic-bezier(.22,1.2,.36,1),opacity .25s ease;}
+
+/* ---- Cascading list/grid entrances ----
+   When JS marks a freshly-shown container .anim-in, its repeated
+   children rise in sequence (capped at 12 so long lists never
+   feel slow). Also used for late-rendered data (dashboard stats,
+   client list) via .anim-pop. */
+.js-anim .anim-in .client-item,
+.js-anim .anim-in .history-item,
+.js-anim .anim-in .session-card,
+.js-anim .anim-in .library-row,
+.js-anim .anim-in .plan-card,
+.js-anim .anim-in .stat-tile,
+.js-anim .anim-in .kpi-tile,
+.js-anim .anim-in .motivation-card{
+  animation:staggerUp .34s var(--ease) both;
+}
+.js-anim .anim-in .client-item:nth-child(1),
+.js-anim .anim-in .history-item:nth-child(1),
+.js-anim .anim-in .session-card:nth-child(1),
+.js-anim .anim-in .library-row:nth-child(1),
+.js-anim .anim-in .plan-card:nth-child(1),
+.js-anim .anim-in .stat-tile:nth-child(1),
+.js-anim .anim-in .kpi-tile:nth-child(1){animation-delay:.04s;}
+.js-anim .anim-in .client-item:nth-child(2),
+.js-anim .anim-in .history-item:nth-child(2),
+.js-anim .anim-in .session-card:nth-child(2),
+.js-anim .anim-in .library-row:nth-child(2),
+.js-anim .anim-in .plan-card:nth-child(2),
+.js-anim .anim-in .stat-tile:nth-child(2),
+.js-anim .anim-in .kpi-tile:nth-child(2){animation-delay:.09s;}
+.js-anim .anim-in .client-item:nth-child(3),
+.js-anim .anim-in .history-item:nth-child(3),
+.js-anim .anim-in .session-card:nth-child(3),
+.js-anim .anim-in .library-row:nth-child(3),
+.js-anim .anim-in .plan-card:nth-child(3),
+.js-anim .anim-in .stat-tile:nth-child(3),
+.js-anim .anim-in .kpi-tile:nth-child(3){animation-delay:.14s;}
+.js-anim .anim-in .client-item:nth-child(4),
+.js-anim .anim-in .history-item:nth-child(4),
+.js-anim .anim-in .session-card:nth-child(4),
+.js-anim .anim-in .library-row:nth-child(4),
+.js-anim .anim-in .plan-card:nth-child(4),
+.js-anim .anim-in .stat-tile:nth-child(4),
+.js-anim .anim-in .kpi-tile:nth-child(4){animation-delay:.19s;}
+.js-anim .anim-in .client-item:nth-child(5),
+.js-anim .anim-in .history-item:nth-child(5),
+.js-anim .anim-in .session-card:nth-child(5),
+.js-anim .anim-in .library-row:nth-child(5),
+.js-anim .anim-in .plan-card:nth-child(5),
+.js-anim .anim-in .stat-tile:nth-child(5),
+.js-anim .anim-in .kpi-tile:nth-child(5){animation-delay:.24s;}
+.js-anim .anim-in .client-item:nth-child(n+6),
+.js-anim .anim-in .history-item:nth-child(n+6),
+.js-anim .anim-in .session-card:nth-child(n+6),
+.js-anim .anim-in .library-row:nth-child(n+6),
+.js-anim .anim-in .plan-card:nth-child(n+6),
+.js-anim .anim-in .stat-tile:nth-child(n+6),
+.js-anim .anim-in .kpi-tile:nth-child(n+6){animation-delay:.28s;}
+
+/* Small pop used when fresh data lands into an already-open screen */
+@keyframes popIn{from{opacity:0;transform:translateY(8px) scale(.985);}to{opacity:1;transform:none;}}
+.js-anim .anim-pop{animation:popIn .3s var(--ease) both;}
+
+/* ---- Extended cascade list (site-wide animated feel) ----
+   Every repeated item type across all screens rises in sequence
+   when its screen appears or when fresh data pops in. */
+.js-anim .anim-in .notif-item,
+.js-anim .anim-in .reminder-item,
+.js-anim .anim-in .class-time-row,
+.js-anim .anim-in .contact-item,
+.js-anim .anim-in .exercise-item,
+.js-anim .anim-in .dash-row,
+.js-anim .anim-in .client-upcoming-item,
+.js-anim .anim-in .calc-result-card,
+.js-anim .anim-in .tools-card,
+.js-anim .anim-in .report-card,
+.js-anim .anim-in .section-card,
+.js-anim .anim-pop .client-item,
+.js-anim .anim-pop .history-item,
+.js-anim .anim-pop .session-card,
+.js-anim .anim-pop .library-row,
+.js-anim .anim-pop .plan-card,
+.js-anim .anim-pop .stat-tile,
+.js-anim .anim-pop .kpi-tile,
+.js-anim .anim-pop .notif-item,
+.js-anim .anim-pop .dash-row,
+.js-anim .anim-pop .client-upcoming-item{
+  animation:staggerUp .32s var(--ease) both;
+}
+.js-anim .anim-in :is(.notif-item,.reminder-item,.class-time-row,.contact-item,.exercise-item,.dash-row,.client-upcoming-item,.calc-result-card,.tools-card,.report-card,.section-card):nth-child(2),
+.js-anim .anim-pop :is(.client-item,.history-item,.session-card,.library-row,.plan-card,.stat-tile,.kpi-tile,.notif-item,.dash-row,.client-upcoming-item):nth-child(2){animation-delay:.06s;}
+.js-anim .anim-in :is(.notif-item,.reminder-item,.class-time-row,.contact-item,.exercise-item,.dash-row,.client-upcoming-item,.calc-result-card,.tools-card,.report-card,.section-card):nth-child(3),
+.js-anim .anim-pop :is(.client-item,.history-item,.session-card,.library-row,.plan-card,.stat-tile,.kpi-tile,.notif-item,.dash-row,.client-upcoming-item):nth-child(3){animation-delay:.11s;}
+.js-anim .anim-in :is(.notif-item,.reminder-item,.class-time-row,.contact-item,.exercise-item,.dash-row,.client-upcoming-item,.calc-result-card,.tools-card,.report-card,.section-card):nth-child(n+4),
+.js-anim .anim-pop :is(.client-item,.history-item,.session-card,.library-row,.plan-card,.stat-tile,.kpi-tile,.notif-item,.dash-row,.client-upcoming-item):nth-child(n+4){animation-delay:.16s;}
+
+/* Smooth in-page scrolling everywhere (respecting reduced motion) */
+@media (prefers-reduced-motion:no-preference){
+  html{scroll-behavior:smooth;}
+}
+
+/* ---- Micro-interactions on interactive elements ---- */
+.js-anim .btn-primary,.js-anim .btn-secondary,.js-anim .btn-admin,.js-anim .btn-danger,
+.js-anim .btn-history,.js-anim .btn-update-site,.js-anim .btn-approvals,.js-anim .btn-contact{
+  transition:transform .15s var(--ease),box-shadow .2s var(--ease),background .2s ease,border-color .2s ease,color .2s ease;}
+.js-anim .btn-primary:active,.js-anim .btn-secondary:active,.js-anim .btn-admin:active,
+.js-anim .btn-danger:active,.js-anim .btn-history:active,.js-anim .btn-small:active{transform:scale(.96);}
+.js-anim .tab-btn{transition:color var(--dur) var(--ease),background var(--dur) var(--ease),transform .15s var(--ease);}
+.js-anim .tab-btn:active{transform:scale(.94);}
+.js-anim .client-item,.js-anim .section-card,.js-anim .card,.js-anim .reminder-section{
+  transition:border-color var(--dur) var(--ease),background var(--dur) var(--ease),
+             box-shadow var(--dur) var(--ease),transform .18s var(--ease);}
+.js-anim input:focus,.js-anim select:focus,.js-anim textarea:focus{
+  transition:box-shadow .2s var(--ease),border-color .2s var(--ease);}
+
 /* Reduced motion: kill every new transition animation too */
 @media (prefers-reduced-motion:reduce){
   .tab-content:not(.hidden),.tab-content.slide-from-left:not(.hidden),.tab-content.slide-from-right:not(.hidden),
   .admin-workspace:not(.hidden),
-  .js-anim .tab-content:not(.hidden) > *,.js-anim .admin-workspace:not(.hidden) > *{
+  .js-anim .tab-content:not(.hidden) > *,.js-anim .admin-workspace:not(.hidden) > *,
+  .anim-in.settings-panel,.anim-in.client-detail-panel,.anim-in.dash-card,.anim-in.login-card,
+  .anim-in.modal-overlay,.anim-in.modal-overlay .modal-box,
+  .js-anim .anim-in .client-item,.js-anim .anim-in .history-item,.js-anim .anim-in .session-card,
+  .js-anim .anim-in .library-row,.js-anim .anim-in .plan-card,.js-anim .anim-in .stat-tile,
+  .js-anim .anim-in .kpi-tile,.js-anim .anim-in .motivation-card,.js-anim .anim-pop,
+  .js-anim .anim-in.settings-panel > *,.js-anim .anim-in.client-detail-panel > *,
+  .js-anim .anim-in :is(.notif-item,.reminder-item,.class-time-row,.contact-item,.exercise-item,.dash-row,.client-upcoming-item,.calc-result-card,.tools-card,.report-card,.section-card),
+  .js-anim .anim-pop :is(.client-item,.history-item,.session-card,.library-row,.plan-card,.stat-tile,.kpi-tile,.notif-item,.dash-row,.client-upcoming-item){
     animation:none !important;
   }
   .tabs-indicator{transition:none;}
+  .js-anim .toast{transition:all 0.28s var(--ease);}
+  .js-anim .btn-primary:active,.js-anim .btn-secondary:active,.js-anim .btn-admin:active,
+  .js-anim .btn-danger:active,.js-anim .btn-history:active,.js-anim .btn-small:active,
+  .js-anim .tab-btn:active{transform:none;}
   .client-item:hover,.history-item:hover,.session-card:hover,.library-row:hover,.plan-card:hover,.stat-tile:hover{transform:none;}
 }
 
