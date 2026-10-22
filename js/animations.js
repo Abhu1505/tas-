@@ -36,7 +36,43 @@
     reduced = mq.matches;
     if (mq.addEventListener) mq.addEventListener('change', function (e) { reduced = e.matches; });
     else if (mq.addListener) mq.addListener(function (e) { reduced = e.matches; });
+    // If the OS asks for reduced motion, don't tag the page at all —
+    // every .js-anim-guarded rule (reveals, cascades, shine…) stays off.
+    if (reduced) { try { document.documentElement.classList.remove('js-anim'); } catch (e2) {} }
   } catch (e) {}
+
+  // 🍏 Apple-style motion is "scroll-driven" — on apple.com the page must
+  // actually scroll for sections to reveal. This portal is a dashboard app
+  // where everything fits one screen, so we add an auto-scroll nudge after
+  // login: the window glides down ~70% of a viewport and back up within
+  // ~1.6s. That single gesture triggers every scroll reveal + KPI roll-up
+  // at once, exactly like landing on an Apple product page. Users who have
+  // already scrolled themselves (or use keyboards/touch mid-load) are left
+  // alone; reduced-motion users never see it.
+  var userScrolled = false;
+  try {
+    window.addEventListener('wheel', function () { userScrolled = true; }, { passive: true, once: true });
+    window.addEventListener('touchstart', function () { userScrolled = true; }, { passive: true, once: true });
+    window.addEventListener('keydown', function (e) {
+      if (/^(Page|Arrow|Home|End|)/.test(e.key)) userScrolled = true;
+    }, { passive: true, once: true });
+  } catch (e) {}
+
+  function appleIntroScroll() {
+    if (reduced || userScrolled) return;
+    if ((window.scrollY || document.documentElement.scrollTop || 0) > 8) return;
+    var d = document.documentElement;
+    var canScroll = (d.scrollHeight - window.innerHeight) > 120;
+    if (!canScroll) return;
+    try {
+      var dist = Math.round(window.innerHeight * 0.7);
+      window.scrollTo({ top: dist, behavior: 'smooth' });
+      setTimeout(function () {
+        if (userScrolled) return;               // don't yank back if they took over
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 950);
+    } catch (e) {}
+  }
 
   // ---- Tab groups ---------------------------------------------------
   // Each group: the buttons, the panel-id prefix and how to map a button
@@ -70,9 +106,9 @@
         if (b.querySelector('.tab-label')) return;
         var hasElement = false;
         for (var n = b.firstChild; n; n = n.nextSibling) {
-          if (n.nodeType === 1) { hasElement = true; break; }   // e.g. badge span
+          if (n.nodeType === 1) { hasElement = true; }   // e.g. badge span
         }
-        if (hasElement) continue;                               // leave badges alone
+        if (hasElement) return;                          // leave badges alone
         var txt = b.textContent;
         b.textContent = '';
         var s = document.createElement('span');
@@ -390,15 +426,39 @@
     } catch (e) {}
   }
 
+  // ---- Screen-change hook -------------------------------------------
+  // The app switches screens by calling window.transitionToCard() (see
+  // js/auth.js). After the new screen has run its entry animation, fire
+  // the Apple-style intro scroll so every below-the-fold section reveals
+  // itself on screen — the moment users said felt "missing" vs apple.com.
+  function wrapTransitionToCard() {
+    try {
+      if (typeof window.transitionToCard !== 'function' || window.transitionToCard.__animWrapped) return;
+      var orig = window.transitionToCard;
+      var wrapped = function () {
+        var r = orig.apply(this, arguments);
+        setTimeout(appleIntroScroll, 650);   // let dashIn/loginPop play first
+        return r;
+      };
+      wrapped.__animWrapped = true;
+      window.transitionToCard = wrapped;
+    } catch (e) {}
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       startObserver(); startPopObserver(); ensureIndicators();
       ensureTabLabels(); revealScan(document); measureChartLines(document);
+      wrapTransitionToCard();
     });
   } else {
     startObserver(); startPopObserver();
     ensureTabLabels(); revealScan(document); measureChartLines(document);
+    wrapTransitionToCard();
   }
+  // auth.js may define transitionToCard slightly later depending on
+  // parse order — retry once more after full load, then again late.
+  window.addEventListener('load', wrapTransitionToCard);
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ensureIndicators);
   } else {
