@@ -41,6 +41,18 @@
     if (reduced) { try { document.documentElement.classList.remove('js-anim'); } catch (e2) {} }
   } catch (e) {}
 
+  // 🛡️ KILL SWITCH: if ANY other script on the page throws an uncaught
+  // error during load (which is exactly how the animations kept silently
+  // dying before), remove html.js-anim immediately. That makes every
+  // reveal/cascade rule inert so content can never get stuck invisible.
+  // The pure-CSS aurora orbs in #bgWatermark are NOT affected by this —
+  // they animate regardless of any JavaScript failure.
+  try {
+    window.addEventListener('error', function () {
+      try { document.documentElement.classList.remove('js-anim'); } catch (e) {}
+    });
+  } catch (e) {}
+
   // 🍏 Apple-style motion is "scroll-driven" — on apple.com the page must
   // actually scroll for sections to reveal. This portal is a dashboard app
   // where everything fits one screen, so we add an auto-scroll nudge after
