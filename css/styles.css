@@ -71,6 +71,37 @@ input,select,textarea,button{font-family:inherit;}
 #bgWatermark img{width:110%;max-width:1500px;height:auto;object-fit:contain;opacity:0.10;filter:grayscale(20%);user-select:none;-webkit-user-drag:none;}
 #bgWatermark .gdrive-fallback{display:none !important;}
 
+/* ---- 🍏 Ambient animated background (Apple-style soft aurora) ----------
+   Slow, blurred colour orbs drift behind the whole app — content-related
+   palette only: TAS steel-blue + brand green + a warm sand accent. They
+   sit BEHIND the watermark logo (more negative z-index inside the same
+   fixed layer) and never intercept clicks. Guarded by html.js-anim so
+   nothing moves if JS is off or the OS asks for reduced motion. */
+#bgWatermark::before,#bgWatermark::after{content:"";position:absolute;border-radius:50%;filter:blur(70px);opacity:0;pointer-events:none;}
+.js-anim #bgWatermark::before{width:60vmax;height:60vmax;left:-18vmax;top:-24vmax;
+  background:radial-gradient(closest-side,rgba(43,110,158,.20),transparent 70%);
+  animation:bgDriftA 26s ease-in-out infinite;}
+.js-anim #bgWatermark::after{width:55vmax;height:55vmax;right:-16vmax;bottom:-22vmax;
+  background:radial-gradient(closest-side,rgba(31,157,92,.16),transparent 70%);
+  animation:bgDriftB 32s ease-in-out infinite;}
+@keyframes bgDriftA{
+  0%,100%{transform:translate(0,0) scale(1);opacity:.55;}
+  35%    {transform:translate(9vmax,7vmax) scale(1.12);opacity:.8;}
+  70%    {transform:translate(4vmax,13vmax) scale(.96);opacity:.6;}
+}
+@keyframes bgDriftB{
+  0%,100%{transform:translate(0,0) scale(1);opacity:.5;}
+  40%    {transform:translate(-11vmax,-8vmax) scale(1.1);opacity:.75;}
+  75%    {transform:translate(-5vmax,-13vmax) scale(.94);opacity:.55;}
+}
+/* faint third orb (warm sand) injected via the svg.wm-svg element's
+   sibling styling hook — keeps DOM untouched */
+.js-anim #bgWatermark .wm-svg{animation:bgDriftC 38s ease-in-out infinite;}
+@keyframes bgDriftC{
+  0%,100%{transform:translateY(0) rotate(0deg);}
+  50%    {transform:translateY(-2.2vh) rotate(1.2deg);}
+}
+
 .unified-wrap{max-width:600px;margin:0 auto;width:100%;}
 .card{background:var(--surface);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:1.6rem;border:1px solid var(--line-soft);width:100%;transition:box-shadow var(--dur) var(--ease);}
 
@@ -2198,6 +2229,18 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 @keyframes lockupRise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
 .js-anim #loginCard:not(.hidden) .login-brand-text{animation:lockupRise .8s var(--ease) both .15s;}
 
+/* ---- 2b. Hero stat-strip shimmer (dashboards) --------------------------
+   The KPI/stat rows get a slow light-wave sweeping across them, like
+   Apple's gradient spec strips — painted in TAS steel→green so it reads
+   as part of the brand, not decoration. */
+.js-anim .home-stats-row,.js-anim .stat-tiles,.js-anim .info-strip{position:relative;overflow:hidden;}
+.js-anim .home-stats-row::after,.js-anim .stat-tiles::after,.js-anim .info-strip::after{
+  content:"";position:absolute;top:-40%;left:-70%;width:40%;height:180%;pointer-events:none;
+  transform:rotate(16deg);border-radius:50%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
+  animation:brandShine 7s var(--ease) infinite 1.2s;
+}
+
 /* ---- 3. Brand shine sweep over the footer wordmark --------------------
    A soft light band glides across the logo every few seconds — the same
    idea Apple uses on gradient headlines, painted in TAS green→steel. */
@@ -2276,6 +2319,8 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 
 /* Reduced motion: this entire Apple-style pass switches off. */
 @media (prefers-reduced-motion:reduce){
+  .js-anim #bgWatermark::before,.js-anim #bgWatermark::after,.js-anim #bgWatermark .wm-svg{animation:none !important;opacity:0 !important;}
+  .js-anim .home-stats-row::after,.js-anim .stat-tiles::after,.js-anim .info-strip::after{animation:none !important;}
   .js-anim .reveal{opacity:1 !important;transform:none !important;filter:none !important;transition:none;}
   .js-anim #loginCard:not(.hidden) > *{animation:none !important;}
   .js-anim #loginCard:not(.hidden) .logo-photo-wrap img,
