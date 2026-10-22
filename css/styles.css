@@ -2148,3 +2148,127 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 .us-version-badge .usvb-btn:hover{background:rgba(233,181,58,.28);transform:translateY(-1px);}
 [data-theme="dark"] .us-version-badge .usvb-btn{color:#ffe9a8;}
 @media (max-width:600px){.us-version-badge{margin-right:.15rem}.us-version-badge .usvb-btn{padding:.25rem .5rem;font-size:.68rem}}
+
+/* ============================================================
+   🍏 APPLE-STYLE MOTION PASS — "content that moves in"
+   Inspired by apple.com's signature motion, but themed entirely to
+   THIS site (a personal-training portal), not generic decoration:
+
+   1. Scroll reveals (.reveal) — like Apple's product sections that
+      drift up + defrost as you scroll. Applied by js/animations.js
+      to footer blocks and every card/section inside a screen.
+   2. Ken-Burns hero breathe — Apple's slow full-bleed image zoom,
+      applied to the TAS logo photo on the login card.
+   3. Brand shine sweep — Apple's gradient-text shimmer, re-skinned
+      with the portal's forest-green brand gradient across the wordmark.
+   4. Rep count-up — Apple's headline number roll-ups, wired to the
+      training KPIs: sessions done, amount due, clients, approvals,
+      monthly sessions and revenue (js/counters).
+   5. Progress fill — bar/plan meters grow from 0 like Apple's spec
+      bars; chart SVGs draw themselves in (stroke-dashoffset / scaleY).
+   6. Weight-drop micro-bounce — pressing an approve/check button
+      makes its icon drop like a plate being racked (btn-check fx).
+   Everything is guarded by .js-anim (never hides content without JS)
+   and fully disabled under prefers-reduced-motion.
+   ============================================================ */
+
+/* ---- 1. Scroll reveals ------------------------------------------------
+   Elements start slightly low + blurred (Apple's "defrost"); the script
+   swaps them to .reveal-in when they enter the viewport. If JS never
+   runs, html.js-anim is absent and everything stays plainly visible. */
+.js-anim .reveal{
+  opacity:0;transform:translateY(26px) scale(.985);filter:blur(7px);
+  transition:opacity .7s var(--ease),transform .7s var(--ease),filter .7s var(--ease);
+  will-change:opacity,transform,filter;
+}
+.js-anim .reveal.reveal-in{opacity:1;transform:none;filter:none;}
+/* keep hover lifts alive while revealed */
+.js-anim .stat-tile.reveal.reveal-in:hover{transform:translateY(-2px);}
+
+/* ---- 2. Ken-Burns hero breathe (login brand photo) ------------------- */
+@keyframes kenBurnsBreathe{
+  0%  {transform:scale(1) translateY(0);}
+  50% {transform:scale(1.055) translateY(-2px);}
+  100%{transform:scale(1) translateY(0);}
+}
+.js-anim #loginCard:not(.hidden) .logo-photo-wrap img{
+  animation:kenBurnsBreathe 11s ease-in-out infinite;
+}
+/* gentle rise for the wordmark + tagline beside it */
+@keyframes lockupRise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+.js-anim #loginCard:not(.hidden) .login-brand-text{animation:lockupRise .8s var(--ease) both .15s;}
+
+/* ---- 3. Brand shine sweep over the footer wordmark --------------------
+   A soft light band glides across the logo every few seconds — the same
+   idea Apple uses on gradient headlines, painted in TAS green→steel. */
+.app-footer-brand{position:relative;display:inline-block;overflow:hidden;border-radius:12px;}
+.js-anim .app-footer-brand::after{
+  content:"";position:absolute;top:-60%;left:-70%;width:45%;height:220%;
+  transform:rotate(18deg);pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
+  animation:brandShine 5.5s var(--ease) infinite;
+}
+@keyframes brandShine{
+  0%,55%{left:-70%;}
+  80%,100%{left:135%;}
+}
+
+/* ---- 4. Count-up numbers ------------------------------------------------
+   The value element gets .counting while the tween runs: it rises softly
+   and holds tabular figures so widths never jitter mid-roll. */
+.counting{font-variant-numeric:tabular-nums;animation:countRise .5s var(--ease) both;}
+@keyframes countRise{from{opacity:.35;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+/* ---- 5. Progress fills & self-drawing charts ----------------------------
+   Bars/plan meters grow from zero when their screen appears or when fresh
+   data pops in (classes added by the render code or by animations.js). */
+@keyframes meterGrow{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+.js-anim .anim-in :is([class*="progress-fill"],[class*="bar-fill"],.meter-fill,.plan-progress-fill),
+.js-anim .anim-pop :is([class*="progress-fill"],[class*="bar-fill"],.meter-fill,.plan-progress-fill){
+  transform-origin:left center;animation:meterGrow .8s var(--ease) both .15s;
+}
+/* SVG lines trace themselves in; bars rise from the baseline — exactly
+   how Apple animates spec charts, applied to weight/body-fat trends. */
+.js-anim .chart-svg polyline,.js-anim .chart-svg path.line{
+  stroke-dasharray:var(--len,2000);stroke-dashoffset:var(--len,2000);
+  animation:drawLine 1.4s var(--ease) forwards .1s;
+}
+@keyframes drawLine{to{stroke-dashoffset:0;}}
+.js-anim .chart-svg rect.chart-bar{
+  transform-box:fill-box;transform-origin:bottom;
+  animation:barRise .7s var(--ease) both;
+}
+.js-anim .chart-svg rect.chart-bar:nth-of-type(2){animation-delay:.06s;}
+.js-anim .chart-svg rect.chart-bar:nth-of-type(3){animation-delay:.12s;}
+.js-anim .chart-svg rect.chart-bar:nth-of-type(4){animation-delay:.18s;}
+.js-anim .chart-svg rect.chart-bar:nth-of-type(n+5){animation-delay:.24s;}
+@keyframes barRise{from{transform:scaleY(0);}to{transform:scaleY(1);}}
+
+/* ---- 6. Weight-drop micro-bounce on approve/check buttons --------------
+   Tap ✅ Approve / ✔ and the emoji drops + settles like a weight plate. */
+@keyframes weightDrop{
+  0%{transform:translateY(-5px) scale(1.18);}
+  55%{transform:translateY(1.5px) scale(.95);}
+  100%{transform:translateY(0) scale(1);}
+}
+.js-anim .weight-drop{display:inline-block;animation:weightDrop .45s cubic-bezier(.22,1.15,.36,1);}
+
+/* Tab switch flourish: the active tab's label does one tiny "rep". */
+.tab-btn.active .tab-label{display:inline-block;animation:repPop .38s var(--ease);}
+@keyframes repPop{0%{transform:translateY(0);}45%{transform:translateY(-3px);}100%{transform:translateY(0);}}
+
+/* Reduced motion: this entire Apple-style pass switches off. */
+@media (prefers-reduced-motion:reduce){
+  .js-anim .reveal{opacity:1 !important;transform:none !important;filter:none !important;transition:none;}
+  .js-anim #loginCard:not(.hidden) .logo-photo-wrap img,
+  .js-anim #loginCard:not(.hidden) .login-brand-text,
+  .js-anim .app-footer-brand::after,
+  .counting,
+  .js-anim .anim-in :is([class*="progress-fill"],[class*="bar-fill"],.meter-fill,.plan-progress-fill),
+  .js-anim .anim-pop :is([class*="progress-fill"],[class*="bar-fill"],.meter-fill,.plan-progress-fill),
+  .js-anim .chart-svg polyline,.js-anim .chart-svg path.line,
+  .js-anim .chart-svg rect.chart-bar,
+  .js-anim .weight-drop,.tab-btn.active .tab-label{animation:none !important;}
+  .js-anim .chart-svg polyline,.js-anim .chart-svg path.line{stroke-dashoffset:0 !important;}
+}
+

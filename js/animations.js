@@ -61,6 +61,31 @@
     return -1;
   }
 
+  // ---- 🍏 Tab "rep" flourish (Apple-style micro-motion) ---------------
+  // Wrap a tab button's text in a span so the active label can do one
+  // tiny hop when it becomes active — like Apple's nav pills settling.
+  function ensureTabLabels() {
+    try {
+      document.querySelectorAll('.tab-btn').forEach(function (b) {
+        if (b.querySelector('.tab-label')) return;
+        var hasElement = false;
+        for (var n = b.firstChild; n; n = n.nextSibling) {
+          if (n.nodeType === 1) { hasElement = true; break; }   // e.g. badge span
+        }
+        if (hasElement) continue;                               // leave badges alone
+        var txt = b.textContent;
+        b.textContent = '';
+        var s = document.createElement('span');
+        s.className = 'tab-label';
+        s.textContent = txt;
+        b.appendChild(s);
+      });
+    } catch (e) {}
+  }
+  // Re-run after every click/render batch: cheap and idempotent, picks
+  // up tab bars that the app injects later (client detail, approvals…).
+  function scheduleTabLabels() { setTimeout(ensureTabLabels, 320); }
+
   function applyDirection(panelEl, fromIdx, toIdx) {
     if (!panelEl || reduced || fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
     panelEl.classList.remove('slide-from-left', 'slide-from-right');
@@ -119,6 +144,97 @@
     } catch (e) {}
   }
   document.addEventListener('click', function () { setTimeout(refreshVisibleIndex, 80); });
+
+  // ---- 🍏 Apple-style scroll reveals -----------------------------------
+  // Sections drift up + defrost as they enter the viewport — the same
+  // motion apple.com uses between product blocks, applied to THIS app's
+  // real content: footer columns, dashboards, tab panels, workspace
+  // blocks, cards, stat tiles, KPI tiles, schedule rows, plan/history/
+  // session items… Newly rendered lists get picked up automatically by
+  // the pop-observer below (it calls revealScan).
+  var REVEAL_SELECTOR = [
+    '.footer-top > *', '.footer-bottom',
+    '#loginCard .login-head', '#loginCard .subhead', '#loginCard .input-group',
+    '#loginCard .btn-primary', '#loginCard .admin-contact',
+    '.dash-card .client-upcoming-card', '.dash-card .howto-card',
+    '.tab-content > .section-card', '.admin-workspace > .section-card',
+    '.settings-panel', '.danger-panel', '.reminder-section', '.credentials-box',
+    '.stat-tile', '.home-stat', '.kpi-tile', '.motivation-card',
+    '.client-item', '.history-item', '.session-card', '.plan-card',
+    '.library-row', '.exercise-item', '.notif-item', '.reminder-item',
+    '.class-time-row', '.contact-item', '.client-upcoming-item',
+    '.calc-result-card', '.tools-card', '.report-card'
+  ].join(',');
+  var revealIO = null;
+  function ensureRevealObserver() {
+    if (revealIO || typeof IntersectionObserver === 'undefined') return;
+    try {
+      revealIO = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (!entries[i].isIntersecting) continue;
+          var el = entries[i].target;
+          revealIO.unobserve(el);
+          el.classList.add('reveal-in');
+          setTimeout(function (e) { return function () { e.classList.remove('reveal', 'reveal-in'); }; }(el), 950);
+        }
+      }, { rootMargin: '0px 0px -6% 0px', threshold: 0.04 });
+    } catch (e) { revealIO = null; }
+  }
+  function revealScan(root) {
+    if (reduced) return;                       // no hidden states when motion is off
+    try {
+      ensureRevealObserver();
+      if (!revealIO) return;
+      var scope = root && root.querySelectorAll ? root : document;
+      var list = scope.querySelectorAll(REVEAL_SELECTOR);
+      for (var i = 0; i < list.length; i++) {
+        var el = list[i];
+        if (el.classList.contains('reveal') || el.classList.contains('hidden')) continue;
+        if (el.closest && el.closest('.modal-overlay')) continue;   // modals keep their spring fx
+        el.classList.add('reveal');
+        revealIO.observe(el);
+      }
+    } catch (e) {}
+  }
+
+  // ---- 🍏 Weight-drop micro-bounce on approve/check taps ---------------
+  // Tapping ✅ Approve / ✔ makes its leading icon drop & settle like a
+  // plate being racked — training-flavoured feedback, Apple-level polish.
+  document.addEventListener('click', function (e) {
+    try {
+      if (reduced) return;
+      var btn = e.target && e.target.closest ? e.target.closest('button') : null;
+      if (!btn) return;
+      if (!/approve|✔|✅/.test(btn.textContent || '')) return;
+      var first = btn.firstChild;
+      if (!first || first.nodeType !== 3) return;   // text node holding the emoji
+      var m = first.nodeValue.match(/^\s*(\S)/);
+      if (!m) return;
+      var span = document.createElement('span');
+      span.className = 'weight-drop';
+      span.textContent = m[1];
+      first.nodeValue = first.nodeValue.slice(m[1].length);
+      btn.insertBefore(span, first.nextSibling ? first.nextSibling : null);
+      span.addEventListener('animationend', function () {
+        try {
+          first.nodeValue = span.textContent + first.nodeValue;
+          btn.removeChild(span);
+        } catch (err) {}
+      });
+    } catch (err) { /* cosmetics never break clicks */ }
+  }, true);
+
+  // ---- Chart lines draw themselves in (Apple spec-chart style) ---------
+  // Measure each polyline once so stroke-dasharray matches its true length.
+  function measureChartLines(root) {
+    try {
+      var scope = root && root.querySelectorAll ? root : document;
+      scope.querySelectorAll('.chart-svg polyline').forEach(function (p) {
+        if (p.style.getPropertyValue('--len')) return;
+        try { p.style.setProperty('--len', Math.ceil(p.getTotalLength()) + 2); } catch (e) {}
+      });
+    } catch (e) {}
+  }
 
   // ---- Sliding pill indicator ----------------------------------------
   // One white pill per .tabs-bar that glides under the active button.
@@ -185,6 +301,8 @@
       void el.offsetWidth;              // restart the CSS animation
       el.classList.add('anim-in');
       setTimeout(function () { el.classList.remove('anim-in'); }, 1000);
+      scheduleTabLabels();              // tab bars inside may be fresh DOM
+      measureChartLines(el);            // charts rendered earlier: prep line lengths
     } catch (e) {}
   }
 
@@ -244,6 +362,11 @@
         void el.offsetWidth;
         el.classList.add('anim-pop');
         setTimeout(function () { el.classList.remove('anim-pop'); }, 700);
+        // Fresh DOM just landed: register scroll-reveals + measure charts
+        // inside it, and pick up any tab buttons rendered with it.
+        revealScan(el);
+        measureChartLines(el);
+        scheduleTabLabels();
       } catch (e) {}
     }, 60);
   }
@@ -270,14 +393,19 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       startObserver(); startPopObserver(); ensureIndicators();
+      ensureTabLabels(); revealScan(document); measureChartLines(document);
     });
   } else {
     startObserver(); startPopObserver();
+    ensureTabLabels(); revealScan(document); measureChartLines(document);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ensureIndicators);
   } else {
     ensureIndicators();
   }
-  setTimeout(ensureIndicators, 600); // late-rendered dashboards
+  setTimeout(function () {
+    ensureIndicators();
+    ensureTabLabels(); revealScan(document); measureChartLines(document);
+  }, 600); // late-rendered dashboards
 })();
