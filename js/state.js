@@ -267,9 +267,11 @@ window.isDayLogEditable = function (clientId, dateStr) {
     .some(s => s.day === Number(dateStr.slice(8, 10)));
   if (!checked) return true; // session still pending (not finished) → fully editable
   // Finished session: editable only when the admin explicitly unlocked it
-  // or approved an edit request.
+  // or approved an edit request. 🕐 Time-change proposals are day-scoped
+  // requests too — they must never flip a finished day into "unlocked".
   const row = (APP_STATE.workoutEditRequests || []).find(r =>
-    sameId(r.client_id, clientId) && r.session_date === dateStr);
+    sameId(r.client_id, clientId) && r.session_date === dateStr &&
+    r.proposed_action !== 'change_time');
   if (row && (row.admin_unlocked || row.status === 'approved')) return true;
   return false;
 };

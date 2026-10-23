@@ -269,7 +269,13 @@ window.openClientDayLog = function (dateStr) {
     if (pendEdits.length > 0) {
       html += `<div style="margin-top:.35rem;"><span class="lock-status-chip">🕓 ${pendEdits.length} change${pendEdits.length > 1 ? 's' : ''} waiting for trainer approval</span></div>`;
     }
+    // 🕐 Class-time row with the ✏️ Edit → propose-a-new-time flow
+    // (trainer approval required before the schedule actually changes).
+    if (typeof window.renderClientTimeRow === 'function') {
+      html += window.renderClientTimeRow(c.id, dateStr);
+    }
     banner.innerHTML = html;
+    if (typeof window.bindClientTimeRow === 'function') window.bindClientTimeRow(dateStr);
   }
 };
 
@@ -718,15 +724,28 @@ window.renderClientUpcoming = function (c) {
       pendingCancelDates[r.session_date] = true;
     }
   });
+  // 🕐 Pending TIME-change proposals staged from ✏️ Edit — shown as a chip so
+  // the client sees the request is with the trainer; the official time stays
+  // unchanged until approval.
+  const pendingTimeByDate = {};
+  (APP_STATE.workoutEditRequests || []).forEach(r => {
+    if (sameId(r.client_id, c.id) && r.proposed_action === 'change_time'
+        && r.session_date && r.status === 'pending') {
+      pendingTimeByDate[r.session_date] = (r.proposed_data || {}).class_time || '';
+    }
+  });
   if (visible.length === 0) {
     html = `<div class="client-upcoming-empty">📭 No classes scheduled in the next few days yet.<br>
       <span>Your trainer will set your upcoming session times here.</span></div>`;
   } else {
     visible.forEach(it => {
       const isToday = it.dateStr === todayStr;
-      const timeHtml = it.time
+      let timeHtml = it.time
         ? `<span class="client-upcoming-time">⏰ ${formatClassTime12(it.time)}</span>`
         : `<span class="client-upcoming-time-not-set">Time not set yet</span>`;
+      if (pendingTimeByDate[it.dateStr]) {
+        timeHtml += ` <span class="lock-status-chip" title="Your proposed time is waiting for trainer approval">🕓 ⏰ ${escapeHtml(formatClassTime12(pendingTimeByDate[it.dateStr]))} awaiting approval</span>`;
+      }
       let statusHtml = it.done
         ? '<span class="history-pill done">✅ Finished</span>'
         : (isToday ? '<span class="history-pill today">🔥 Today</span>' : '<span class="history-pill open">⏳ Pending</span>');
