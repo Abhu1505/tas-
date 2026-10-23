@@ -122,8 +122,16 @@ window.renderClientDashboard = function (c) {
   if (!c) return;
   const nowD = new Date(); const y = nowD.getFullYear(), m = nowD.getMonth();
   const sessions = getSessions(c.id, y, m);
-  $('clientDashMonth').textContent = `${getMonthName(m)} ${y}`;
-  $('clientDashDone').textContent = sessions.length;
+  // 🛡️ BLINK FIX: write these tiles only when the text genuinely changed.
+  // renderClientDashboard() runs on every login, poll tick and realtime
+  // sync; unconditional writes made the counter roll-up + pop animations
+  // replay constantly (the "blinking" clients saw on ✅ Sessions done).
+  const monthText = `${getMonthName(m)} ${y}`;
+  const monthEl = $('clientDashMonth');
+  if (monthEl && monthEl.textContent !== monthText) monthEl.textContent = monthText;
+  const doneEl = $('clientDashDone');
+  const doneText = String(sessions.length);
+  if (doneEl && doneEl.textContent !== doneText) doneEl.textContent = doneText;
   // 💵 Amount due tile is rendered by js/payments.js (renderPaymentCard):
   // it shows sessions × rate PLUS any unpaid months carried over, and only
   // drops to zero once a payment is completed.

@@ -365,20 +365,22 @@
     });
   }
 
-  // Read-only trainer-details block inside the client payment card.
+  // Read-only trainer-details block. 🔒 PRIVACY: this block is NEVER shown
+  // on the home screen anymore. It only appears AFTER the client taps a
+  // payment button (e.g. 🏦 Bank Transfer) — see revealCoachDetails().
+  // The modal itself (tasShowBankTransferModal) already carries its own
+  // full-detail sheet, so nothing leaks on the dashboard beforehand.
   function coachDetailsBlockHTML(cfg, info) {
+    if (!info || !info.revealed) return ''; // hidden until a payment tap
     const rows = detailRowsFromConfig(cfg);
     let head = `<div class="payment-coach-title">🏦 Coach's transfer details <span class="pc-chip">updated by your coach</span></div>`;
     if (!rows.length) {
-      return `<div class="payment-coach-details hidden-details">${head}<div class="pc-empty">Your coach hasn't saved transfer details yet. Tap “🏦 Bank Transfer” below and follow the on-screen instructions.</div></div>`;
+      return `<div class="payment-coach-details">${head}<div class="pc-empty">Your coach hasn't saved transfer details yet. Tap “🏦 Bank Transfer” below and follow the on-screen instructions.</div></div>`;
     }
-    const masked = info.allClear; // no payment to make → stay hidden/blurred
-    return `<div class="payment-coach-details${masked ? ' hidden-details' : ''}">` +
+    return `<div class="payment-coach-details coach-reveal">` +
       head +
-      `<div class="pc-hint">${masked
-        ? '🔒 These are the details your coach wants you to transfer to. Tap any payment button to reveal them.'
-        : 'Read-only — exactly as updated by your coach. Tap 📋 beside any line to copy that single detail for pasting into your banking app.'}</div>` +
-      rows.map(r => detailLineHTML(r.label, r.value, masked)).join('') +
+      `<div class="pc-hint">Read-only — exactly as updated by your coach. Tap 📋 beside any line to copy that single detail for pasting into your banking app.</div>` +
+      rows.map(r => detailLineHTML(r.label, r.value, false)).join('') +
       `<div class="pc-lock-note">🔒 Values cannot be edited here — they come directly from your coach's account settings.</div>` +
       `</div>`;
   }
@@ -571,15 +573,17 @@
     return div;
   }
 
-  // Reveal the trainer's FULL details once the client starts paying.
-  // (The card summary stays blurred until a payment attempt — "only when
-  // the client tries to make a payment should the full details pop up".)
+  // Reveal the trainer's FULL details ONLY after the client taps a payment
+  // button (e.g. 🏦 Bank Transfer). Before that tap, nothing is rendered in
+  // this slot at all — no blurred lines, no masked values on the home screen.
   function revealCoachDetails() {
     const slot = $id('coachDetailsSlot');
-    if (!slot || !slot.querySelector('.payment-coach-details')) return;
-    slot.classList.add('revealed');
+    if (!slot) return;
+    // Already revealed? Don't re-render / re-animate on repeat taps.
+    if (slot.dataset.revealed === 'yes') return;
+    slot.dataset.revealed = 'yes';
     const cfg = window.getPaymentProviderConfig();
-    slot.innerHTML = coachDetailsBlockHTML(cfg, { allClear: false });
+    slot.innerHTML = coachDetailsBlockHTML(cfg, { revealed: true });
     bindCopyButtons(slot);
     toast("👀 Trainer's transfer details revealed — tap 📋 on any line to copy it individually.", 'info', 5000);
   }
@@ -716,13 +720,16 @@
     if (methods) {
       const slot = $id('coachDetailsSlot');
       if (slot) {
-        // Read-only coach details, shown right above the payment buttons.
-        // Values are exactly what the admin last updated; they pop to full
-        // view only once the client taps a payment button (see
-        // revealCoachDetails). Until then each line stays blurred/masked.
-        const alreadyRevealed = slot.classList.contains('revealed');
-        slot.innerHTML = coachDetailsBlockHTML(window.getPaymentProviderConfig(),
-          { allClear: info.allClear && !alreadyRevealed });
+        // 🔒 PRIVACY FIX: the coach's transfer details are NOT displayed on
+        // the home screen at all. The slot stays empty until the client taps
+        // a payment button (revealCoachDetails, wired to every method click).
+        // Once revealed, later re-renders (60s polls / realtime syncs) keep
+        // the block visible — but only via a diff check, so identical HTML is
+        // never re-written (prevents flicker/re-animation).
+        const revealed = slot.dataset.revealed === 'yes';
+        const nextHTML = coachDetailsBlockHTML(window.getPaymentProviderConfig(),
+          { revealed });
+        if (slot.innerHTML !== nextHTML) slot.innerHTML = nextHTML;
         bindCopyButtons(slot);
       }
       if (methods.dataset.bound !== 'yes') { methods.innerHTML = methodButtonHTML(); methods.dataset.bound = 'yes'; }
@@ -747,8 +754,14 @@
     }
 
     // Update the headline tile: total DUE (with carry-over), not just this month.
+    // 🛡️ BLINK FIX: only touch the DOM when the value actually changed — an
+    // identical re-write used to fire the counter MutationObserver + pop-in
+    // animations on every 60s poll / realtime sync, making the tile flicker.
     const tile = $id('clientDashAmount');
-    if (tile) tile.textContent = `${CUR()} ${(info.totalDue || 0).toLocaleString('en-US')}`;
+    if (tile) {
+      const tileText = `${CUR()} ${(info.totalDue || 0).toLocaleString('en-US')}`;
+      if (tile.textContent !== tileText) tile.textContent = tileText;
+    }
 
     // Payment history (cloud rows + local mirror, newest first).
     if (hist) {

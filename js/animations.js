@@ -387,7 +387,11 @@
   // new batch a single soft pop (never per-item — avoids flicker on
   // frequent re-renders).
   var POP_TARGETS = [
-    'homeStatsRow', 'clientStatGrid', 'clientListContainer', 'approvalsList',
+    // 🛡️ BLINK FIX: 'clientStatGrid' removed — the client stat tiles are
+    // re-rendered by the 60s notification poll and every realtime sync, so
+    // popping the whole grid made the ✅/💵 tiles visibly blink several times
+    // a minute. The individual numbers still roll-up nicely via counters.js.
+    'homeStatsRow', 'clientListContainer', 'approvalsList',
     'libraryList', 'assignList', 'clientHistoryList', 'clientPlanList',
     'clientProgressList', 'adminProgressList', 'clientUpcomingList',
     'clientInsightKpis', 'reportsPanel', 'monthSummaryContent',
