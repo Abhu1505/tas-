@@ -2389,3 +2389,27 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 .tas-card-modal.hidden{display:none;}
 .tas-card-modal-card{background:var(--surface,#fff);color:var(--ink,#222);border-radius:16px;padding:1.1rem 1.2rem;max-width:420px;width:100%;box-shadow:0 24px 60px -20px rgba(0,0,0,.5);}
 @media (max-width:560px){.payment-methods .pay-method-btn{flex:1 1 100%;justify-content:center;}}
+/* ============================================================
+   🏦 COACH TRANSFER DETAILS — read-only in the client portal
+   (js/payments.js). Values come from what the ADMIN updated;
+   clients can copy each line individually but can NEVER edit
+   them (plain text spans, no inputs/contenteditable). Full
+   values pop up only when the client taps a payment button;
+   before that they stay blurred + masked.
+   ============================================================ */
+.payment-coach-details{margin:.7rem 0 .3rem;border:1px solid var(--line,#e3e8ee);border-radius:12px;padding:.6rem .75rem;background:var(--surface,#fff);display:flex;flex-direction:column;gap:.35rem;}
+.payment-coach-title{font-size:.82rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft,#555);display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;}
+.pc-chip{font-size:.62rem;font-weight:800;letter-spacing:.03em;text-transform:none;background:#dcf5e4;color:#136c3a;border-radius:999px;padding:.12rem .5rem;}
+[data-theme="dark"] .pc-chip{background:#123f26;color:#7fe0a8;}
+.pc-hint{font-size:.78rem;opacity:.75;}
+.pc-empty{font-size:.82rem;opacity:.75;}
+.pc-lock-note{font-size:.72rem;opacity:.6;margin-top:.15rem;}
+.bank-detail-line{display:grid;grid-template-columns:1fr auto auto;gap:.55rem;align-items:center;padding:.35rem .5rem;border:1px solid var(--line,#e3e8ee);border-radius:10px;background:var(--bg,#fafbfc);}
+.bd-label{font-size:.8rem;opacity:.75;white-space:nowrap;}
+.bd-value{font-size:.88rem;text-align:right;word-break:break-all;user-select:all;-webkit-user-select:all;}
+.bd-copy{appearance:none;border:1px solid var(--line,#d5dbe2);background:var(--surface,#fff);border-radius:8px;cursor:pointer;font-size:.85rem;line-height:1;padding:.3rem .45rem;transition:transform .12s ease,filter .12s ease;}
+.bd-copy:hover{transform:translateY(-1px);filter:brightness(1.05);}
+.bd-copy:active{transform:translateY(0);}
+/* Blurred/masked until the client actually tries to pay */
+.payment-coach-details.hidden-details .bd-value{filter:blur(5px);-webkit-filter:blur(5px);user-select:none;-webkit-user-select:none;pointer-events:none;transition:filter .25s ease;}
+.payment-coach-details.hidden-details .pc-hint{opacity:.9;font-weight:600;}
