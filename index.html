@@ -394,6 +394,7 @@
       <button class="tab-btn active" data-atab2="home" type="button" role="tab" id="adminTabHomeBtn">🏠 Home</button>
       <button class="tab-btn" data-atab2="clients" type="button" role="tab" id="adminTabClientsBtn">📋 Clients <span id="adminClientsTabCount" class="badge-count">0</span></button>
       <button class="tab-btn" data-atab2="calculators" type="button" role="tab" id="adminTabCalculatorsBtn">🧮 Calculators</button>
+      <button class="tab-btn" data-atab2="payments" type="button" role="tab" id="adminTabPaymentsBtn">💳 Incoming Payments <span id="adminPaymentsTabCount" class="badge-count hidden">0</span></button>
     </div>
 
     <!-- ---------- WORKSPACE 1: HOME — create clients quickly ---------- -->
@@ -722,6 +723,15 @@
       </div>
       <div class="calc-hub-wrap" id="adminCalcHub"></div>
     </div><!-- /adminWorkspaceCalculators -->
+
+    <!-- ---------- WORKSPACE 4: PAYMENTS — 💳 Incoming Payments & ⚙️ Settings ----------
+         The payment panel that used to float at the side of the screen as a
+         fixed bubble now lives inside this top tab. js/payments.js injects
+         its content into #adminPaymentPanelHost whenever the admin session
+         is active; clients never see the tab or the panel. -->
+    <div id="adminWorkspacePayments" class="admin-workspace hidden">
+      <div id="adminPaymentPanelHost"></div>
+    </div><!-- /adminWorkspacePayments -->
   </div>
 
 <!-- MODALS -->

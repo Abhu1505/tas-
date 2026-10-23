@@ -828,19 +828,38 @@
   }
 
   function removeAdminPaymentPanel() {
-    const existing = document.getElementById('adminPaymentPanelFab');
-    if (existing) existing.remove();
+    // The old floating side bubble (removed in favour of the top tab).
+    const fab = document.getElementById('adminPaymentPanelFab');
+    if (fab) fab.remove();
+    // Clients must never see the 💳 Incoming Payments workspace or its tab.
+    const ws = document.getElementById('adminWorkspacePayments');
+    if (ws) ws.classList.add('hidden');
+    const tabBtn = document.getElementById('adminTabPaymentsBtn');
+    if (tabBtn) tabBtn.classList.add('hidden');
+    const host = document.getElementById('adminPaymentPanelHost');
+    if (host) host.innerHTML = '';
   }
 
   function ensureAdminPaymentPanel() {
-    let panel = document.getElementById('adminPaymentPanelFab');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'adminPaymentPanelFab';
-      panel.style.cssText = 'position:fixed;right:14px;bottom:86px;z-index:1200;max-width:min(420px,calc(100vw - 28px));max-height:70vh;overflow:auto;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:.9rem 1rem;';
-      document.body.appendChild(panel);
+    // 📑 The panel now lives inside the admin workspace tab bar
+    // ("💳 Incoming Payments" next to Home / Clients / Calculators) instead
+    // of floating at the side of the screen as a fixed bubble.
+    let host = document.getElementById('adminPaymentPanelHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'adminPaymentPanelHost';
+      const ws = document.getElementById('adminWorkspacePayments');
+      if (ws) ws.appendChild(host);
+      else document.body.appendChild(host);
     }
-    return panel;
+    const tabBtn = document.getElementById('adminTabPaymentsBtn');
+    if (tabBtn) tabBtn.classList.remove('hidden');
+    // Admins who are already on the 💳 Payments workspace when the panel
+    // first renders (e.g. after a dashboard re-render) get it instantly;
+    // otherwise it stays hidden until the tab is opened.
+    const wsNow = document.getElementById('adminWorkspacePayments');
+    host.style.display = (wsNow && !wsNow.classList.contains('hidden')) ? 'block' : 'none';
+    return host;
   }
 
   window.renderAdminPaymentPanel = function () {
@@ -848,8 +867,7 @@
     // Admin-only: in a client portal the panel element is removed from the
     // DOM entirely (not just hidden), so clients can never see or reach it.
     if (!show) { removeAdminPaymentPanel(); return; }
-    const panel = ensureAdminPaymentPanel();
-    panel.style.display = '';
+    const panel = ensureAdminPaymentPanel();   // host div inside the 💳 tab workspace
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
     const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
@@ -864,12 +882,24 @@
       if (seenKeys[k]) return false; seenKeys[k] = 1; return true;
     });
 
+    // 📑 Tab badge: show the pending count directly on the top
+    // "💳 Incoming Payments" tab button.
+    const payBadge = document.getElementById('adminPaymentsTabCount');
+    if (payBadge) {
+      payBadge.textContent = rows.length;
+      payBadge.classList.toggle('hidden', !rows.length);
+    }
+
+    panel.style.cssText = 'background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.08);padding:.9rem 1rem;max-width:720px;margin:0 auto;';
+    // Keep the panel visible only while the 💳 Payments workspace tab is open.
+    const wsVis = document.getElementById('adminWorkspacePayments');
+    panel.style.display = (wsVis && !wsVis.classList.contains('hidden')) ? 'block' : 'none';
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
         <strong>💳 Incoming Payments</strong>
         <button class="btn-secondary btn-small" id="apToggleBody" type="button" style="width:auto;">${rows.length ? `🔔 ${rows.length} pending` : '⚙️ Settings'}</button>
       </div>
-      <div id="apBody" class="hidden" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem;">
+      <div id="apBody" class="${rows.length ? '' : 'hidden'}" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem;">
         <div style="font-size:.8rem;opacity:.75;">Verify money actually landed in YOUR bank/PayPal, then approve. Only approved payments clear a client's amount due; rejected ones stay due and carry over.</div>
         <div id="adminPendingList" style="display:flex;flex-direction:column;gap:.5rem;"></div>
         <details style="margin-top:.3rem;">
