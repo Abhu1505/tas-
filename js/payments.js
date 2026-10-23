@@ -5,10 +5,13 @@
 //   • Shows the amount due for the current month's sessions inside
 //     the client portal ("💵 Amount due" tile + a dedicated
 //     "💳 Pay For Your Sessions" card with a monthly statement).
-//   • Payment methods are DIRECT-TO-COACH ONLY — no third-party gateway,
+//   • Payment methods are DIRECT-TO-COACH ONLY — no paid gateway,
 //     no API keys anywhere:
 //       🏦 Bank Transfer → money lands straight in the trainer's bank account
-//       🅿️ PayPal.me     → money lands straight in the trainer's PayPal
+//       🅿️ PayPal.me     → money lands straight in the trainer's PayPal.
+//         Clients in ANY country can pay from inside PayPal using their
+//         linked Visa/Mastercard, Apple Pay or Samsung Pay — 100% free for
+//         personal accounts (peer-to-peer, same currency). No keys needed.
 //       ✔️ Record payment (cash / plain transfer) fallback if neither is set up.
 //     Declared transfers are stored as 'pending' and only clear the balance
 //     once the trainer approves them from the admin "💳 Incoming Payments" panel.
@@ -293,6 +296,11 @@
     if (cfg.bankIban) rows.push(['🔢 IBAN', cfg.bankIban]);
     if (cfg.bankSwift) rows.push(['🌐 SWIFT/BIC', cfg.bankSwift]);
     if (cfg.bankUpi) rows.push(['📱 UPI ID', cfg.bankUpi]);
+    // If the coach hasn't saved bank details yet, still give the client a
+    // usable sheet: pay from their own banking app to the coach and declare.
+    if (!rows.length) {
+      rows.push(['ℹ️ How to pay', "Open your banking app and send the exact amount below directly to your coach's account, then tap \"I have transferred\" here so they can verify and clear your balance."]);
+    }
     const esc = (s) => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
     return new Promise((resolve) => {
@@ -462,12 +470,17 @@
     const cfg = window.getPaymentProviderConfig();
     const btns = [];
     // 🏦 Direct transfer into the trainer's own bank account (no gateway).
-    if (hasBankDetails(cfg)) {
+    // Shown even before details are saved so clients know the option exists;
+    // tapping it without details opens a "send via your banking app" sheet.
+    if (cfg.bankEnabled !== false) {
       btns.push(`<button class="pay-method-btn pay-bank" data-pay-method="bank" type="button">🏦 Bank Transfer <span class="pm-note">(direct to coach's account)</span></button>`);
     }
-    // PayPal.me — pays straight into the trainer's PayPal wallet.
+    // PayPal.me — pays straight into the trainer's PayPal wallet. Clients in
+    // any country can tap this and pay with their linked Visa/Mastercard,
+    // Apple Pay or Samsung Pay inside PayPal — 100% free for personal
+    // accounts, money lands directly in the coach's PayPal. No API keys.
     if (cfg.paypalLink) {
-      btns.push(`<button class="pay-method-btn pay-paypal" data-pay-method="paypal" type="button">🅿️ PayPal <span class="pm-note">(opens paypal.me)</span></button>`);
+      btns.push(`<button class="pay-method-btn pay-paypal" data-pay-method="paypal" type="button">🅿️ PayPal <span class="pm-note">(cards · Apple Pay · Samsung Pay — direct to coach)</span></button>`);
     }
     if (!hasBankDetails(cfg) && !cfg.paypalLink) {
       btns.push(`<button class="pay-method-btn pay-offline" data-pay-method="offline" type="button">✔️ Record payment <span class="pm-note">(bank transfer / cash)</span></button>`);
@@ -478,19 +491,20 @@
   async function declarePaidViaExternal(methodKey, cloudMethod, c, info, link) {
     const amount = info.totalDue;
     if (amount <= 0) { toast('✅ You have nothing due — enjoy your training!', 'success'); return; }
+    if (!link) { toast('⚠️ The coach has not set up a PayPal.me link yet.', 'warning'); return; }
     const keys = collectUnpaidKeys(info);
     const invoiceKey = keys.slice().sort().join('+');
     const label = `TAS Personal Training — ${keys.map(monthLabel).join(', ')}`;
     // Open the direct payment destination in a new tab (pop-up blockers:
     // triggered from a user click so window.open is allowed).
-    try { window.open(link, '_blank', 'noopener'); } catch (e) {}
+    try { window.open(link + encodeURIComponent(String(amount)), '_blank', 'noopener'); } catch (e) {}
     const conf = (typeof window.uiConfirm === 'function')
       ? await window.uiConfirm({
           title: '🅿️ Confirm PayPal payment',
-          message: `Have you completed the payment of ${fmtMoney(amount)} (${label}) via PayPal? Your coach will verify and your balance clears once confirmed.`,
+          message: `In the PayPal page that just opened, pay with your linked Visa/Mastercard, Apple Pay or Samsung Pay (all free for personal accounts — money goes straight to your coach). Have you completed the payment of ${fmtMoney(amount)} (${label})? Your balance clears once your coach confirms receipt.`,
           confirmText: '✅ I have paid', cancelText: 'Not yet'
         })
-      : window.confirm(`Have you completed the PayPal payment of ${fmtMoney(amount)}?`);
+      : window.confirm(`Have you completed the PayPal payment of ${fmtMoney(amount)} using your card / Apple Pay / Samsung Pay?`);
     if (!conf) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
     const res = await persistPayment(c.id, invoiceKey, cloudMethod, amount, 'declared:' + nowStamp(), 'pending');
     toast('💶 Payment noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
@@ -645,11 +659,27 @@
   // are editable here and stored in admin_config (cloud) so every client
   // portal shows them without redeploying.
   // ============================================================
+  // Admin-only gate: the panel must NEVER appear in a client portal.
+  // 1. If the client dashboard is currently visible, this is a client
+  //    session — hide unconditionally, even if an admin login is also
+  //    remembered on the same device/browser.
+  // 2. Otherwise require BOTH an admin-remembered session AND the admin
+  //    dashboard actually being present & visible in the DOM.
   function isAdminSession() {
     try {
+      const cd = document.getElementById('clientDashboard');
+      if (cd && !cd.classList.contains('hidden')) return false; // client portal open
+      const ad = document.getElementById('adminDashboard');
+      const adminVisible = !!ad && !ad.classList.contains('hidden');
       const sess = (typeof window.tasLoadSession === 'function') ? window.tasLoadSession() : null;
-      return (sess && sess.role === 'admin') || !!document.getElementById('adminDashboard');
+      const adminSess = !!(sess && sess.role === 'admin');
+      return adminVisible && adminSess;
     } catch (e) { return false; }
+  }
+
+  function removeAdminPaymentPanel() {
+    const existing = document.getElementById('adminPaymentPanelFab');
+    if (existing) existing.remove();
   }
 
   function ensureAdminPaymentPanel() {
@@ -664,10 +694,12 @@
   }
 
   window.renderAdminPaymentPanel = function () {
-    const panel = ensureAdminPaymentPanel();
     const show = APP_STATE && isAdminSession();
-    panel.style.display = show ? '' : 'none';
-    if (!show) return;
+    // Admin-only: in a client portal the panel element is removed from the
+    // DOM entirely (not just hidden), so clients can never see or reach it.
+    if (!show) { removeAdminPaymentPanel(); return; }
+    const panel = ensureAdminPaymentPanel();
+    panel.style.display = '';
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
     const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
@@ -698,7 +730,7 @@
             <input class="input" id="apBankIban" placeholder="IBAN" value="${esc(cfg.bankIban)}" />
             <input class="input" id="apBankSwift" placeholder="SWIFT/BIC (optional)" value="${esc(cfg.bankSwift)}" />
             <input class="input" id="apBankUpi" placeholder="UPI ID (optional)" value="${esc(cfg.bankUpi)}" />
-            <input class="input" id="apPaypal" placeholder="PayPal.me link (optional)" value="${esc(cfg.paypalLink)}" />
+            <input class="input" id="apPaypal" placeholder="PayPal.me link — clients can pay with Visa/Mastercard, Apple Pay or Samsung Pay (free, direct to you). e.g. https://paypal.me/yourhandle" value="${esc(cfg.paypalLink)}" />
             <button class="btn-primary" id="apSaveBank" type="button" style="width:auto;">💾 Save payment details</button>
           </div>
         </details>
@@ -801,7 +833,7 @@
   function methodLabel(m) {
     switch (String(m || '')) {
       case 'bank_transfer': return '🏦 Bank Transfer';
-      case 'paypal': return '🅿️ PayPal';
+      case 'paypal': return '🅿️ PayPal (card / Apple Pay / Samsung Pay)';
       default: return '🏦 Transfer/Cash';
     }
   }
@@ -851,6 +883,23 @@
     })();
     // Safety net: if the dashboard rendered before this script booted.
     document.addEventListener('DOMContentLoaded', () => setTimeout(renderAll, 300));
+    // Watch the admin/client dashboard visibility directly, so the panel
+    // appears ONLY while the admin dashboard is on screen and is removed
+    // the moment a client portal (or the login card) is shown — even if
+    // other code paths re-render without calling renderAll().
+    try {
+      const dashObserver = new MutationObserver(() => {
+        try { window.renderAdminPaymentPanel(); } catch (e) {}
+      });
+      const watch = () => {
+        ['adminDashboard', 'clientDashboard'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) dashObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+        });
+      };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+      else watch();
+    } catch (e) {}
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
