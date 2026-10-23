@@ -5,6 +5,10 @@ window.renderApprovals = function () {
     : APP_STATE.currentApprovalType === 'workout'
       ? (APP_STATE.workoutEditRequests || []).filter(r => r.status === 'pending')
       : APP_STATE.progressApprovals;
+  // Cancelled classes that the trainer already approved live in the Decided
+  // tab so the approval trail is visible after the class disappears.
+  const approvedCancels = (APP_STATE.workoutEditRequests || [])
+    .filter(r => r.proposed_action === 'cancel_class' && r.status === 'approved');
   let list = APP_STATE.currentApprovalTab === 'pending'
     ? source.filter(a => a.status === 'pending')
     : source.filter(a => a.status !== 'pending');
@@ -23,14 +27,16 @@ window.renderApprovals = function () {
       const submitted = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
       const pd = r.proposed_data || {};
       const action = r.proposed_action || 'unlock';
-      const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑' : action === 'edit' ? '✏️' : '🔓';
+      const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑' : action === 'edit' ? '✏️' : action === 'cancel_class' ? '🚫' : '🔓';
       const title = action === 'add'
         ? `Add exercise “${escapeHtml(pd.exercise_name || '?')}”`
         : action === 'delete'
           ? 'Remove an exercise'
           : action === 'edit'
             ? `Change ${Object.keys(pd).map(k => `<strong>${escapeHtml(k)}</strong> → <em>${escapeHtml(String(pd[k] ?? '—'))}</em>`).join(', ')}`
-            : 'Unlock day for editing';
+            : action === 'cancel_class'
+              ? 'Cancel this class — approving removes it from the client\'s schedule &amp; billing'
+              : 'Unlock day for editing';
       html += `<div class="approval-card">
         <div class="approval-card-header"><div style="min-width:0;">
           <div class="approval-card-title">${icon} Workout Edit — ${escapeHtml(clientName)}</div>
@@ -48,6 +54,18 @@ window.renderApprovals = function () {
       b.addEventListener('click', () => decideWorkoutEditRequest(b.dataset.werId, b.dataset.werClient, b.dataset.werDate, 'approved')));
     container.querySelectorAll('.btn-reject[data-wer-id]').forEach(b =>
       b.addEventListener('click', () => decideWorkoutEditRequest(b.dataset.werId, b.dataset.werClient, b.dataset.werDate, 'rejected')));
+    // Decided tab: show the trail of already-approved class cancellations.
+    if (APP_STATE.currentApprovalTab !== 'pending' && approvedCancels.length) {
+      let cancelHtml = '';
+      approvedCancels.forEach(r => {
+        const c = getClient(r.client_id);
+        cancelHtml += `<div class="approval-card completed"><div class="approval-card-header"><div style="min-width:0;">
+          <div class="approval-card-title completed">🚫 Class Cancelled — ${escapeHtml(c ? c.name : 'Unknown')}</div>
+          <div class="approval-card-date">Day: <strong>${escapeHtml(r.session_date)}</strong> · Approved cancellation applied.</div>
+        </div></div></div>`;
+      });
+      container.innerHTML += cancelHtml;
+    }
     return;
   }
   list.forEach(a => {
@@ -324,9 +342,11 @@ window.decideWorkoutEditRequest = async function (id, clientId, dateStr, decisio
   const ok = await uiConfirm({
     title: decision === 'approved' ? 'Approve Edit' : 'Deny Edit',
     message: decision === 'approved'
-      ? (action === 'unlock'
-        ? `Unlock the workout log for ${dateStr} so the client can edit it?`
-        : `Apply the client's proposed change (${action}) to the official log for ${dateStr}?`)
+      ? (action === 'cancel_class'
+        ? `Cancel the class on ${dateStr}? It will be removed from the client's schedule and billing.`
+        : action === 'unlock'
+          ? `Unlock the workout log for ${dateStr} so the client can edit it?`
+          : `Apply the client's proposed change (${action}) to the official log for ${dateStr}?`)
       : `Deny the edit request for ${dateStr}?`,
     confirmText: decision === 'approved' ? '✅ Approve' : '❌ Deny',
     danger: decision !== 'approved'
@@ -335,7 +355,21 @@ window.decideWorkoutEditRequest = async function (id, clientId, dateStr, decisio
   if (!req) { renderApprovals(); return; }
   try {
     const sb = APP_STATE.supabaseClient;
-    if (decision === 'approved' && action !== 'unlock') {
+    if (decision === 'approved' && action === 'cancel_class') {
+      // ---- Remove the class: daily time + any finished-session row ----
+      try { await sb.from('daily_times').delete().eq('client_id', clientId).eq('day_date', dateStr); } catch (e) { /* table optional */ }
+      const dtArr = clientMapGet(APP_STATE.dailyTimesCache, clientId) || [];
+      clientMapSet(APP_STATE.dailyTimesCache, clientId, dtArr.filter(d => d.day_date !== dateStr));
+      const parts = dateStr.split('-').map(Number);
+      const key = getSessionCacheKey(clientId, parts[0], parts[1] - 1);
+      if (APP_STATE.sessionCache[key]) {
+        const had = APP_STATE.sessionCache[key].some(s => s.day === parts[2]);
+        if (had) {
+          await sb.from('sessions').delete().eq('client_id', clientId).eq('session_date', dateStr);
+          APP_STATE.sessionCache[key] = APP_STATE.sessionCache[key].filter(s => s.day !== parts[2]);
+        }
+      }
+    } else if (decision === 'approved' && action !== 'unlock') {
       // ---- Apply the staged proposal to the official log ----
       const pd = req.proposed_data || {};
       const k = `${clientId}-${dateStr}`;
