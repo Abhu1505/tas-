@@ -659,11 +659,27 @@
   // are editable here and stored in admin_config (cloud) so every client
   // portal shows them without redeploying.
   // ============================================================
+  // Admin-only gate: the panel must NEVER appear in a client portal.
+  // 1. If the client dashboard is currently visible, this is a client
+  //    session — hide unconditionally, even if an admin login is also
+  //    remembered on the same device/browser.
+  // 2. Otherwise require BOTH an admin-remembered session AND the admin
+  //    dashboard actually being present & visible in the DOM.
   function isAdminSession() {
     try {
+      const cd = document.getElementById('clientDashboard');
+      if (cd && !cd.classList.contains('hidden')) return false; // client portal open
+      const ad = document.getElementById('adminDashboard');
+      const adminVisible = !!ad && !ad.classList.contains('hidden');
       const sess = (typeof window.tasLoadSession === 'function') ? window.tasLoadSession() : null;
-      return (sess && sess.role === 'admin') || !!document.getElementById('adminDashboard');
+      const adminSess = !!(sess && sess.role === 'admin');
+      return adminVisible && adminSess;
     } catch (e) { return false; }
+  }
+
+  function removeAdminPaymentPanel() {
+    const existing = document.getElementById('adminPaymentPanelFab');
+    if (existing) existing.remove();
   }
 
   function ensureAdminPaymentPanel() {
@@ -678,10 +694,12 @@
   }
 
   window.renderAdminPaymentPanel = function () {
-    const panel = ensureAdminPaymentPanel();
     const show = APP_STATE && isAdminSession();
-    panel.style.display = show ? '' : 'none';
-    if (!show) return;
+    // Admin-only: in a client portal the panel element is removed from the
+    // DOM entirely (not just hidden), so clients can never see or reach it.
+    if (!show) { removeAdminPaymentPanel(); return; }
+    const panel = ensureAdminPaymentPanel();
+    panel.style.display = '';
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
     const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
@@ -865,6 +883,23 @@
     })();
     // Safety net: if the dashboard rendered before this script booted.
     document.addEventListener('DOMContentLoaded', () => setTimeout(renderAll, 300));
+    // Watch the admin/client dashboard visibility directly, so the panel
+    // appears ONLY while the admin dashboard is on screen and is removed
+    // the moment a client portal (or the login card) is shown — even if
+    // other code paths re-render without calling renderAll().
+    try {
+      const dashObserver = new MutationObserver(() => {
+        try { window.renderAdminPaymentPanel(); } catch (e) {}
+      });
+      const watch = () => {
+        ['adminDashboard', 'clientDashboard'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) dashObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+        });
+      };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+      else watch();
+    } catch (e) {}
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
