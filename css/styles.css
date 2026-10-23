@@ -90,6 +90,11 @@ input,select,textarea,button{font-family:inherit;}
 #bgWatermark .orb-c{width:42vmax;height:42vmax;left:38%;top:44%;
   background:radial-gradient(closest-side,rgba(201,162,39,.14),transparent 70%);
   animation:bgDriftC2 40s ease-in-out infinite;}
+/* 🔥 Fourth "ember" orb — warm energy accent that drifts across the middle
+   of the screen, giving the aurora layer a gym-poster colour pop. */
+#bgWatermark .orb-d{width:36vmax;height:36vmax;left:8%;bottom:-16vmax;
+  background:radial-gradient(closest-side,rgba(232,118,39,.16),transparent 70%);
+  animation:bgDriftD 34s ease-in-out infinite;}
 @keyframes bgDriftA{
   0%,100%{transform:translate(0,0) scale(1);opacity:.6;}
   35%    {transform:translate(9vmax,7vmax) scale(1.12);opacity:.85;}
@@ -104,6 +109,56 @@ input,select,textarea,button{font-family:inherit;}
   0%,100%{transform:translate(0,0) scale(1);opacity:.45;}
   50%    {transform:translate(-8vmax,6vmax) scale(1.15);opacity:.7;}
 }
+@keyframes bgDriftD{
+  0%,100%{transform:translate(0,0) scale(1);opacity:.4;}
+  45%    {transform:translate(16vmax,-10vmax) scale(1.18);opacity:.7;}
+  80%    {transform:translate(6vmax,-4vmax) scale(.92);opacity:.5;}
+}
+
+/* ---- 🏋️ GYM-THEME ANIMATED LAYER (pure CSS, JS optional) ----------------
+   Two extras sit inside #bgWatermark behind everything:
+   • .gym-grid  — an "engine-room floor" grid that slowly glides toward the
+     viewer, like walking down a gym aisle. Diagonal neon sheen sweeps add
+     depth. Fades out near the top so it never fights the content.
+   • .gym-pulse — two soft energy rings that expand & fade from the corners,
+     like a heartbeat / kettlebell swing rhythm.
+   Both are REAL elements in index.html with pure-CSS keyframes — they
+   animate even if every script fails, and pointer-events:none keeps them
+   click-through. */
+#bgWatermark .gym-grid{position:absolute;left:-50%;right:-50%;bottom:-12%;height:62%;
+  transform:rotateX(62deg);transform-origin:bottom center;pointer-events:none;z-index:0;
+  opacity:.16;
+  -webkit-mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.55) 45%,transparent 85%);
+  mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.55) 45%,transparent 85%);
+  background-image:
+    repeating-linear-gradient(90deg,rgba(43,110,158,.55) 0 2px,transparent 2px 74px),
+    repeating-linear-gradient(0deg,rgba(31,157,92,.5) 0 2px,transparent 2px 74px),
+    repeating-linear-gradient(115deg,rgba(255,255,255,.10) 0 5px,transparent 5px 320px),
+    repeating-linear-gradient(115deg,rgba(232,118,39,.10) 0 3px,transparent 3px 540px);
+  background-size:74px 74px,74px 74px,340px 340px,560px 560px;
+  animation:gymGridGlide 14s linear infinite,gymSheen 11s ease-in-out infinite;will-change:background-position;}
+@keyframes gymGridGlide{from{background-position:0 0,0 0,0 0,0 0;}to{background-position:0 74px,0 74px,0 340px,0 560px;}}
+@keyframes gymSheen{0%,100%{filter:brightness(1);}50%{filter:brightness(1.5);}}
+#bgWatermark .gym-pulse{position:absolute;width:52vmax;height:52vmax;border-radius:50%;
+  border:2px solid rgba(43,110,158,.30);pointer-events:none;z-index:0;opacity:0;
+  will-change:transform,opacity;}
+#bgWatermark .gym-pulse.p1{left:-20vmax;bottom:-20vmax;animation:gymPulseRing 9s ease-out infinite;}
+#bgWatermark .gym-pulse.p2{right:-18vmax;top:-18vmax;border-color:rgba(31,157,92,.26);animation:gymPulseRing 11s ease-out 3s infinite;}
+@keyframes gymPulseRing{
+  0%  {transform:scale(.55);opacity:0;}
+  12% {opacity:.5;}
+  100%{transform:scale(1.35);opacity:0;}
+}
+/* Dark theme: keep the same layers but tuned for the night-workout mood */
+[data-theme="dark"] #bgWatermark .gym-grid{opacity:.22;
+  background-image:
+    repeating-linear-gradient(90deg,rgba(127,178,216,.5) 0 2px,transparent 2px 74px),
+    repeating-linear-gradient(0deg,rgba(95,174,135,.45) 0 2px,transparent 2px 74px),
+    repeating-linear-gradient(115deg,rgba(255,255,255,.06) 0 5px,transparent 5px 320px),
+    repeating-linear-gradient(115deg,rgba(255,140,66,.09) 0 3px,transparent 3px 540px);}
+[data-theme="dark"] #bgWatermark .gym-pulse.p1{border-color:rgba(127,178,216,.28);}
+[data-theme="dark"] #bgWatermark .gym-pulse.p2{border-color:rgba(95,174,135,.24);}
+[data-theme="dark"] #bgWatermark .orb-d{background:radial-gradient(closest-side,rgba(255,140,66,.12),transparent 70%);}
 /* gentle "breathe" on the watermark mark itself — also pure CSS */
 #bgWatermark .wm-svg{animation:wmBreathe 38s ease-in-out infinite;}
 @keyframes wmBreathe{
@@ -285,6 +340,24 @@ button:disabled{opacity:0.55;cursor:not-allowed;}
 .tab-btn{padding:0.5rem 0.9rem;border-radius:var(--r-sm);font-size:0.78rem;font-weight:700;cursor:pointer;background:transparent;border:none;color:var(--ink-soft);white-space:nowrap;min-height:auto;flex-shrink:0;transition:all var(--dur) var(--ease);}
 .tab-btn:hover{color:var(--brand-700);background:rgba(255,255,255,.6);}
 .tab-btn.active{background:var(--surface);color:var(--brand-700);box-shadow:var(--shadow-sm);}
+/* 🏋️ Gym-style active tab: steel→green energy gradient + lift + ember glow.
+   Applies to every .tabs-bar across the site (client dock tabs, admin
+   workspace tabs, client-detail tabs, create-client tabs). The sliding
+   pill injected by js/animations.js is hidden for these bars so the
+   gradient IS the highlight — one consistent look everywhere. */
+.tab-btn.active{border:none;background:linear-gradient(135deg,var(--steel-700),var(--brand-600));
+  color:#fff;box-shadow:0 8px 18px -8px rgba(30,77,109,.55),0 4px 12px -6px rgba(43,110,158,.45);
+  transform:translateY(-1px);}
+.tab-btn.active:hover{color:#fff;background:linear-gradient(135deg,var(--steel-600),var(--brand-500));}
+.tab-btn:not(.active):hover{transform:translateY(-1px);}
+[data-theme="dark"] .tab-btn.active{background:linear-gradient(135deg,#1c5378,#2e8b66);color:#fff;}
+@media (max-width:700px){
+  /* Phone client dock: softer full-width pills — keep text legible on
+     light background but tint it with the brand gradient colours. */
+  .client-tabs .tab-btn.active{background:linear-gradient(160deg,var(--steel-100),var(--brand-100));
+    color:var(--brand-700);box-shadow:var(--shadow-sm);transform:none;}
+  [data-theme="dark"] .client-tabs .tab-btn.active{background:linear-gradient(160deg,#1d3446,#1d3b2e);color:#8ecda9;}
+}
 .tab-content.hidden{display:none;}
 
 /* ============================================================
@@ -324,20 +397,13 @@ button:disabled{opacity:0.55;cursor:not-allowed;}
 .js-anim .admin-workspace:not(.hidden) > :nth-child(n+4){animation-delay:.18s;}
 
 /* Sliding pill indicator behind the active tab button (injected by
-   js/animations.js). Sits under the buttons, follows .active smoothly. */
+   js/animations.js). With the new gym-gradient active style the pill is
+   no longer needed — hide it everywhere so the gradient IS the highlight,
+   and keep one consistent look across all tab bars site-wide. */
 .tabs-bar{position:relative;}
-.tabs-indicator{position:absolute;top:0.35rem;left:0;height:calc(100% - 0.7rem);
-  border-radius:var(--r-sm);background:var(--surface);box-shadow:var(--shadow-sm);
-  transition:transform .3s var(--ease),width .3s var(--ease),opacity .2s ease;
-  pointer-events:none;z-index:0;opacity:0;}
-[data-theme="dark"] .tabs-indicator{background:#1c3145;}
+.tabs-indicator{display:none !important;}
+[data-theme="dark"] .tabs-indicator{display:none !important;}
 .tabs-bar .tab-btn{position:relative;z-index:1;}
-.tabs-bar:not(.client-tabs) .tab-btn.active{background:transparent;box-shadow:none;}
-@media (max-width:700px){
-  /* Phone dock tabs are full-width equal pills — a gliding pill would be
-     pointless there, so keep each active button's own highlight instead. */
-  .client-tabs .tabs-indicator{display:none;}
-}
 
 /* Hover lift on interactive rows/cards (buttons keep their own press fx) */
 .client-item:hover,.history-item:hover,.session-card:hover,.library-row:hover,.plan-card:hover{
@@ -895,7 +961,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,[t
 [data-theme="dark"] .client-login-badge{background:#3a2130;color:#f3b8d0;border-color:#7a3a5b;}
 [data-theme="dark"] .toast{background:rgba(24,43,58,.94);color:var(--ink);}
 [data-theme="dark"] #bgWatermark img{opacity:0.05;filter:grayscale(60%) brightness(1.6);}
-[data-theme="dark"] .tab-btn.active{background:var(--surface-tint);}
+/* dark-mode tab active style now comes from the gym gradient block above */
 [data-theme="dark"] ::-webkit-scrollbar-thumb{background:#3a556c;}
 [data-theme="dark"] .btn-secondary{background:var(--surface-tint);color:var(--ink);}
 [data-theme="dark"] .copyable:hover{background:var(--brand-100);box-shadow:0 0 0 3px var(--brand-100);}
@@ -2129,9 +2195,17 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 /* ---------- Tab bar: horizontal scroll on small phones + active glow ---------- */
 .tabs-bar{scrollbar-width:thin;}
 .tab-btn{position:relative;}
-.tab-btn.active::after{content:""; position:absolute; left:20%; right:20%; bottom:2px; height:3px;
-  border-radius:var(--r-pill); background:var(--grad-brand); animation:tabGlow .3s var(--ease);}
+.tab-btn.active::after{content:""; position:absolute; left:18%; right:18%; bottom:-7px; height:3px;
+  border-radius:var(--r-pill); background:linear-gradient(90deg,#ffb347,#ff7849); box-shadow:0 0 10px rgba(255,140,66,.65);
+  animation:tabGlow .3s var(--ease);}
 @keyframes tabGlow{from{opacity:0; transform:scaleX(.4)}to{opacity:1; transform:none}}
+/* Keep the ember underline inside the tab bar everywhere: bars are short
+   (padding .35rem) so -7px would poke outside and get clipped. */
+.tabs-bar .tab-btn.active::after{bottom:3px;}
+@media (max-width:700px){
+  /* Phone client dock keeps the underline INSIDE the soft pill */
+  .client-tabs .tab-btn.active::after{bottom:2px;left:30%;right:30%;}
+}
 
 /* ---------- Skeleton shimmer placeholder utility ---------- */
 .skeleton{position:relative; overflow:hidden; background:var(--surface-tint); border-radius:var(--r-sm);}
@@ -2334,6 +2408,10 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 @media (prefers-reduced-motion:reduce){
   /* orbs freeze in place (still faintly visible, just never moving) */
   #bgWatermark .aurora,#bgWatermark .wm-svg{animation:none !important;}
+  /* gym floor grid + energy rings freeze too (grid stays as a static motif,
+     rings hide themselves since their resting state is transparent) */
+  #bgWatermark .gym-grid{animation:none !important;}
+  #bgWatermark .gym-pulse{animation:none !important;opacity:0 !important;}
   .js-anim #bgWatermark::before,.js-anim #bgWatermark::after,.js-anim #bgWatermark .wm-svg{animation:none !important;opacity:0 !important;}
   .js-anim .home-stats-row::after,.js-anim .stat-tiles::after,.js-anim .info-strip::after{animation:none !important;}
   .js-anim .reveal{opacity:1 !important;transform:none !important;filter:none !important;transition:none;}
