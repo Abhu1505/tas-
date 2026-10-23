@@ -758,8 +758,13 @@ window.renderClientUpcoming = function (c) {
       // buttons but they were never rendered (root cause of "client view is
       // not working"). Finished days stay view-only.
       if (!it.done && !pendingCancelDates[it.dateStr]) {
-        actionBtn += `<button class="btn-secondary btn-small client-upcoming-edit" data-date="${it.dateStr}" title="Propose exercise changes for this day">✏️ Edit</button>
+        actionBtn += `<button class="btn-secondary btn-small client-upcoming-edit-time" data-date="${it.dateStr}" title="Propose a new class time — your trainer must approve it">🕐 Edit time</button>
+          <button class="btn-secondary btn-small client-upcoming-edit" data-date="${it.dateStr}" title="Propose exercise changes for this day">✏️ Edit</button>
           <button class="btn-danger-small btn-small client-upcoming-cancel" data-date="${it.dateStr}" title="Ask your trainer to cancel this class">🚫 Cancel</button>`;
+      } else if (it.done) {
+        // ✅ Finished sessions can also get a proposed NEW TIME — but only
+        // after the trainer approves (change_time request on that date).
+        actionBtn += `<button class="btn-secondary btn-small client-upcoming-edit-time" data-date="${it.dateStr}" title="Propose a different time for this day — needs trainer approval">🕐 Edit time</button>`;
       }
       html += `<div class="client-upcoming-item ${it.done ? 'done' : 'open'}" data-date="${it.dateStr}">
         <span class="client-upcoming-icon">${it.done ? '✅' : '📅'}</span>
@@ -783,6 +788,13 @@ window.renderClientUpcoming = function (c) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       window.requestClassCancellation(btn.dataset.date);
+    }));
+  // 🕐 Inline "Edit time" — opens the day sheet with the class-time row
+  // focused, where the client picks a new time and sends it for approval.
+  container.querySelectorAll('.client-upcoming-edit-time').forEach(btn =>
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.openClientTimeEditor(btn.dataset.date);
     }));
   container.querySelectorAll('.client-upcoming-item[data-date]').forEach(item =>
     item.addEventListener('dblclick', () => openClientDayLog(item.dataset.date)));

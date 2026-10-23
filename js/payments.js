@@ -720,17 +720,22 @@
     if (methods) {
       const slot = $id('coachDetailsSlot');
       if (slot) {
-        // 🔒 PRIVACY FIX: the coach's transfer details are NOT displayed on
-        // the home screen at all. The slot stays empty until the client taps
-        // a payment button (revealCoachDetails, wired to every method click).
-        // Once revealed, later re-renders (60s polls / realtime syncs) keep
-        // the block visible — but only via a diff check, so identical HTML is
-        // never re-written (prevents flicker/re-animation).
-        const revealed = slot.dataset.revealed === 'yes';
+        // 🔒 PRIVACY + UX: the coach's transfer details belong ONLY to the
+        // payment flow — they must never sit on the home screen. The slot is
+        // therefore empty by default and gets filled when the client taps a
+        // payment button (revealCoachDetails, wired to every method click).
+        // Two extra rules:
+        //   • once the balance is fully paid (allClear) the block is cleared
+        //     again — nothing lingers on the home after payment is done;
+        //   • while still unpaid, later re-renders (10s polls / realtime
+        //     syncs) keep the revealed block visible via a diff check, so
+        //     identical HTML is never re-written (prevents flicker).
+        const revealed = slot.dataset.revealed === 'yes' && !info.allClear;
+        if (!revealed) slot.dataset.revealed = '';
         const nextHTML = coachDetailsBlockHTML(window.getPaymentProviderConfig(),
           { revealed });
         if (slot.innerHTML !== nextHTML) slot.innerHTML = nextHTML;
-        bindCopyButtons(slot);
+        if (revealed) bindCopyButtons(slot);
       }
       if (methods.dataset.bound !== 'yes') { methods.innerHTML = methodButtonHTML(); methods.dataset.bound = 'yes'; }
       const offBtn = methods.querySelector('.pay-offline');

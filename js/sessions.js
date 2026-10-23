@@ -242,6 +242,54 @@ window.getPendingTimeChangeFor = function (clientId, dateStr) {
     r.proposed_action === 'change_time' && r.status === 'pending') || null;
 };
 
+// 🕐 Quick "Edit time" sheet on the client's upcoming-schedule row. Opens a
+// small modal with a time pre-filled from the current schedule; sending it
+// stages a workout_edit_request (change_time) — the official class time only
+// changes after the trainer approves it in ✅ Approvals → 📅 Schedule.
+window.openClientTimeEditor = function (dateStr) {
+  const c = APP_STATE.loggedInClient;
+  if (!c || !dateStr) return;
+  if (!APP_STATE.supabaseClient) {
+    showToast('⏳ Still connecting to the cloud — try again in a second.', 'warning', 3500);
+    return;
+  }
+  const old = document.getElementById('clientTimeSheet');
+  if (old) old.remove();
+  const cur = getTimeForDate(c.id, dateStr);
+  const pend = getPendingTimeChangeFor(c.id, dateStr);
+  const defVal = pend ? ((pend.proposed_data || {}).class_time || '') : (cur.isSet ? (cur.time || '') : '');
+  const wrap = document.createElement('div');
+  wrap.id = 'clientTimeSheet';
+  wrap.className = 'modal-overlay hidden';
+  const dp = String(dateStr).split('-').map(Number);
+  const dateLabel = (dp.length === 3 && dp[0] && dp[1] && dp[2])
+    ? formatDateReadable(dp[0], dp[1] - 1, dp[2]) : String(dateStr);
+  wrap.innerHTML = `<div class="modal-card" style="max-width:420px;">
+    <div class="modal-title">🕐 Propose a new class time</div>
+    <p class="modal-subhead">${escapeHtml(dateLabel)}</p>
+    <div class="field" style="margin-top:.5rem;"><label>New time</label>
+      <input type="time" id="ctsTime" value="${escapeHtml(defVal || '07:00')}" /></div>
+    ${pend ? `<div style="margin-top:.4rem;"><span class="lock-status-chip">🕓 A request for this day is already awaiting approval — sending a new one replaces it.</span></div>` : ''}
+    <div class="modal-actions" style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.8rem;">
+      <button type="button" class="btn-secondary" id="ctsCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="ctsSend">📩 Send for approval</button>
+    </div>
+    <p class="section-card-hint" style="margin-top:.6rem;">🔒 The schedule keeps the current time${cur.isSet ? ' (⏰ ' + escapeHtml(formatClassTime12(cur.time)) + ')' : ''} until your trainer approves your proposal.</p>
+  </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.remove('hidden'));
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  wrap.querySelector('#ctsCancel').onclick = close;
+  wrap.querySelector('#ctsSend').onclick = async () => {
+    const t = wrap.querySelector('#ctsTime').value;
+    if (!t) { showToast('⚠️ Pick a time first.', 'warning'); return; }
+    close();
+    await submitClientTimeProposal(dateStr, t, cur);
+    if (typeof renderClientUpcoming === 'function') renderClientUpcoming(c);
+  };
+};
+
 // 🕐 Markup for the class-time row inside the CLIENT day-log modal. Shows the
 // trainer-set time; on OPEN days it also offers a time picker + "Send to
 // trainer" so the client can propose a new time (approval required before it

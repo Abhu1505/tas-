@@ -275,6 +275,13 @@ window.checkClientUpdatesAndNotify = function () {
 };
 
 /* ---------- shared polling loop (admin OR client) ---------- */
+// Background auto-refresh interval: every 10 SECONDS we silently re-fetch
+// the data that matters to the open portal (approvals for trainers,
+// schedule/class-times/plan/progress for clients), diff it against the
+// last snapshot and fire 🔔 alerts + badges for anything new — so users
+// see updates without touching 🔄 Refresh. Supabase Realtime still pokes
+// instantly when available; this 10s loop is the always-on safety net.
+const NOTIFICATION_POLL_MS = 10 * 1000;
 window.startNotificationPolling = function () {
   if (APP_STATE.notificationPollHandle) clearInterval(APP_STATE.notificationPollHandle);
   const tick = async () => {
@@ -316,12 +323,35 @@ window.startNotificationPolling = function () {
         const { data: pe } = await sb.from('progress_entries').select('*').eq('client_id', cid)
           .order('entry_date', { ascending: false });
         APP_STATE.progressEntries[cid] = pe || [];
+        // ⏰ Time-change edit requests on "Your upcoming schedule": pull the
+        // latest rows so a trainer's Approve/Decline (or a new proposal from
+        // another tab) shows up in the portal within one 10s tick — no manual
+        // refresh needed. We merge (not replace) so admin-side rows for other
+        // clients stay intact; client RLS only returns their own rows anyway.
+        try {
+          const { data: er } = await sb.from('workout_edit_requests').select('*')
+            .eq('client_id', cid).order('requested_at', { ascending: false });
+          if (er) {
+            const others = (APP_STATE.workoutEditRequests || []).filter(r => !sameId(r.client_id, cid));
+            APP_STATE.workoutEditRequests = er.concat(others);
+          }
+        } catch (e) { /* table missing / offline — next tick retries */ }
         checkClientUpdatesAndNotify();
         // 🛡️ BLINK FIX: only re-render the dashboard when something actually
-        // changed. Previously every 60s poll (and every realtime poke) forced
-        // a full re-render with identical data, which replayed the stat-tile
+        // changed. Previously every poll (and every realtime poke) forced a
+        // full re-render with identical data, which replayed the stat-tile
         // roll-up/pop animations — the tiles appeared to blink for no reason.
-        if (!APP_STATE.clientSnapshot || APP_STATE.clientSnapshot.changed) {
+        // The pending-time-proposal signature below makes the ⏰ Pending chip
+        // on "Your upcoming schedule" appear/disappear within one tick when
+        // the trainer approves or declines — without constant re-renders.
+        const pendSig = (APP_STATE.workoutEditRequests || [])
+          .filter(r => sameId(r.client_id, cid) && r.proposed_action === 'change_time' && r.status === 'pending')
+          .map(r => `${r.session_date}@${((r.proposed_data || {}).class_time) || ''}`)
+          .sort().join('|');
+        if (APP_STATE._lastPendSig === undefined) APP_STATE._lastPendSig = pendSig;
+        const pendChanged = pendSig !== APP_STATE._lastPendSig;
+        APP_STATE._lastPendSig = pendSig;
+        if (!APP_STATE.clientSnapshot || APP_STATE.clientSnapshot.changed || pendChanged) {
           renderClientDashboard(APP_STATE.loggedInClient);
         }
       }
@@ -329,7 +359,7 @@ window.startNotificationPolling = function () {
   };
   // First pass primes the snapshots quietly (no alerts on login).
   tick().catch(() => {});
-  APP_STATE.notificationPollHandle = setInterval(tick, 60000);
+  APP_STATE.notificationPollHandle = setInterval(tick, NOTIFICATION_POLL_MS);
 };
 
 /* ---------- Realtime hook: instant alerts, not just 60s polls ---------- */
