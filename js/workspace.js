@@ -10,15 +10,25 @@
   'use strict';
 
   // Show one of the admin workspaces (Home = create/stats, Clients = roster &
-  // tools, Calculators = Fitness Calculator Hub).
+  // tools, Calculators = Fitness Calculator Hub, Payments = 💳 Incoming
+  // Payments panel — moved out of the floating side bubble into this tab).
   window.showAdminWorkspaceTab = function (tab) {
     const home = $('adminWorkspaceHome');
     const clients = $('adminWorkspaceClients');
     const calcs = $('adminWorkspaceCalculators');
+    const pays = $('adminWorkspacePayments');
     if (!home || !clients) return;
     home.classList.toggle('hidden', tab !== 'home');
     clients.classList.toggle('hidden', tab !== 'clients');
     if (calcs) calcs.classList.toggle('hidden', tab !== 'calculators');
+    if (pays) pays.classList.toggle('hidden', tab !== 'payments');
+    // 💳 The Incoming Payments panel lives inside the payments workspace;
+    // show/hide its content with the tab (js/payments.js re-renders it).
+    const payHost = $('adminPaymentPanelHost');
+    if (payHost) payHost.style.display = tab === 'payments' ? 'block' : 'none';
+    if (tab === 'payments' && typeof window.renderAdminPaymentPanel === 'function') {
+      try { window.renderAdminPaymentPanel(); } catch (e) {}
+    }
     document.querySelectorAll('.tab-btn[data-atab2]').forEach(b =>
       b.classList.toggle('active', b.dataset.atab2 === tab));
     if (tab === 'clients' && typeof renderClientList === 'function') renderClientList();
