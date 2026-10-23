@@ -11,26 +11,35 @@ window.submitWorkoutEditProposal = async function (opts) {
   if (!c || !opts || !opts.session_date) return false;
   if (!APP_STATE.supabaseClient) { showToast('⏳ Still connecting to the cloud — try again in a second.', 'warning'); return false; }
   const action = opts.action || 'edit';
+  // 🕐 Time-change proposals carry their own metadata so the trainer card
+  // can show old → new and apply it to daily_times on approval.
+  const data = (action === 'delete') ? {} : Object.assign({}, opts.proposed_data || {});
+  if (action === 'change_time') {
+    data.current_time = opts.current_time || null;
+    data.current_note = opts.current_note || null;
+  }
   const payload = {
     client_id: c.id,
     session_date: opts.session_date,
     proposed_action: action,
     entry_log_id: (opts.entry_log_id != null && String(opts.entry_log_id).indexOf('proposed-') !== 0)
       ? String(opts.entry_log_id) : null,
-    proposed_data: (action === 'delete') ? {} : (opts.proposed_data || {}),
+    proposed_data: data,
     status: 'pending',
     requested_at: new Date().toISOString()
   };
   try {
-    const { data, error } = await APP_STATE.supabaseClient
+    const { data: row, error } = await APP_STATE.supabaseClient
       .from('workout_edit_requests').insert(payload).select().single();
     if (error) throw error;
-    (APP_STATE.workoutEditRequests = APP_STATE.workoutEditRequests || []).unshift(data || payload);
+    (APP_STATE.workoutEditRequests = APP_STATE.workoutEditRequests || []).unshift(row || payload);
     showToast(action === 'delete'
       ? '🕓 Removal proposed — your trainer must approve it.'
       : action === 'add'
         ? '🕓 Exercise proposed — your trainer must approve it.'
-        : '✅ Change saved as a proposal — applies after trainer approval.', 'success', 3500);
+        : action === 'change_time'
+          ? '🕐 Time change proposed — it applies after your trainer approves it.'
+          : '✅ Change saved as a proposal — applies after trainer approval.', 'success', 3500);
     if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
     if (typeof window.syncClientPendingBanner === 'function') window.syncClientPendingBanner();
     if (typeof renderClientUpcoming === 'function') renderClientUpcoming(c);
@@ -185,6 +194,112 @@ window.openSetTimeModal = function (day) {
   clearStatus($('setTimeStatus'));
 };
 
+// 🕐 Client time-request helper — used by the ✏️ Edit / 👁 View day-log modal
+// on the client portal's "📅 Your upcoming schedule". The proposed time is
+// staged as a workout_edit_request (proposed_action='change_time'); it only
+// lands in daily_times after the trainer approves it.
+async function submitClientTimeProposal(dateStr, newTime, current) {
+  const c = APP_STATE.loggedInClient;
+  if (!c || !dateStr) return;
+  const curT = (current && current.isSet) ? current.time : null;
+  if ((newTime || '') === (curT || '')) {
+    showToast('ℹ️ That is already the time set by your trainer — nothing to send.', 'info', 3500);
+    return;
+  }
+  const dup = getPendingTimeChangeFor(c.id, dateStr);
+  if (dup) {
+    const okEdit = await uiConfirm({
+      title: 'Update pending request?',
+      message: `A time change for this class is already waiting for your trainer (⏰ ${formatClassTime12((dup.proposed_data || {}).class_time)}). Replace it with the new time?`,
+      confirmText: '🔁 Replace request'
+    });
+    if (!okEdit) return;
+    try {
+      const { error } = await APP_STATE.supabaseClient
+        .from('workout_edit_requests')
+        .update({ status: 'withdrawn', decided_at: new Date().toISOString() })
+        .eq('id', dup.id);
+      if (error) throw error;
+      dup.status = 'withdrawn';
+    } catch (e) {
+      showToast('❌ Could not update your previous request: ' + (e.message || e), 'error', 5000);
+      return;
+    }
+  }
+  await window.submitWorkoutEditProposal({
+    session_date: dateStr,
+    action: 'change_time',
+    proposed_data: { class_time: newTime || null },
+    current_time: curT,
+    current_note: current ? current.note : null
+  });
+}
+
+// Pending change_time proposal for a client+day (ignores withdrawn/decided).
+window.getPendingTimeChangeFor = function (clientId, dateStr) {
+  return (APP_STATE.workoutEditRequests || []).find(r =>
+    sameId(r.client_id, clientId) && r.session_date === dateStr &&
+    r.proposed_action === 'change_time' && r.status === 'pending') || null;
+};
+
+// 🕐 Markup for the class-time row inside the CLIENT day-log modal. Shows the
+// trainer-set time; on OPEN days it also offers a time picker + "Send to
+// trainer" so the client can propose a new time (approval required before it
+// changes the official schedule). Exposed on window so progress.js's
+// openClientDayLog banner rebuild reuses exactly the same row + flow.
+window.renderClientTimeRow = function (cid, dateStr) {
+  const current = getTimeForDate(cid, dateStr);
+  const checked = isSessionCheckedForDate(cid, dateStr);
+  const pend = getPendingTimeChangeFor(cid, dateStr);
+  let html = `<div class="client-time-row" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.5rem;padding:.55rem .7rem;background:var(--bg-alt,#f6f8fa);border-radius:10px;">`;
+  html += `<span class="client-time-label">⏰ Class time:</span>`;
+  if (current.isSet) {
+    html += `<strong id="clientTimeCurrent" style="font-size:.95rem;">${escapeHtml(formatClassTime12(current.time))}</strong>`;
+  } else {
+    html += `<em style="color:var(--muted,#7893a8);">not set yet</em>`;
+  }
+  if (pend) {
+    const pt = (pend.proposed_data || {}).class_time;
+    html += `<span class="lock-status-chip">🕓 Your request ⏰ ${escapeHtml(pt ? formatClassTime12(pt) : '—')} is awaiting trainer approval</span>`;
+  }
+  if (!checked) {
+    html += `<input type="time" id="clientTimePick" value="${current.isSet ? escapeHtml(current.time || '') : ''}" aria-label="Propose a new class time">`;
+    html += `<button type="button" class="btn-secondary btn-small" id="clientTimeSendBtn" title="Send your proposed time to your trainer — it applies only after they approve">🕐 Propose new time</button>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+// Wire the time picker inside the client day-log banner (called right after
+// the banner HTML is injected).
+window.bindClientTimeRow = function (dateStr) {
+  const btn = $('clientTimeSendBtn');
+  if (!btn) return;
+  btn.onclick = async () => {
+    if (!APP_STATE.loggedInClient) return;
+    const pick = $('clientTimePick');
+    const t = pick ? pick.value : '';
+    if (!t) { showToast('⚠️ Pick a time first.', 'warning'); return; }
+    const ok = await uiConfirm({
+      title: 'Propose a new class time?',
+      message: `Send ⏰ ${formatClassTime12(t)} to your trainer for ${dateStr}? The schedule keeps the current time until they approve your request.`,
+      confirmText: '📩 Send request'
+    });
+    if (!ok) return;
+    const sent = await window.submitWorkoutEditProposal({
+      session_date: dateStr,
+      action: 'change_time',
+      proposed_data: { class_time: t },
+      current_time: (() => { const cur = getTimeForDate(APP_STATE.loggedInClient.id, dateStr); return cur.isSet ? cur.time : null; })(),
+      current_note: (() => { const cur = getTimeForDate(APP_STATE.loggedInClient.id, dateStr); return cur.note; })()
+    });
+    if (sent) {
+      renderDayLogLockState(dateStr);
+      if (typeof renderClientUpcoming === 'function') renderClientUpcoming(APP_STATE.loggedInClient);
+    }
+  };
+}
+
 window.openDayLogModal = function (day) {
   APP_STATE.selectedDay = day;
   const [y, m] = getViewYearMonth();
@@ -234,7 +349,12 @@ window.renderDayLogLockState = function (dateStr) {
     } else {
       html += `<div class="day-lock-banner"><div class="day-lock-text"><strong>✅ Finished session — official log locked.</strong><br>Need a correction? Ask your trainer to update it.</div></div>`;
     }
+    // 🕐 Class-time row — ✏️ Edit now lets clients propose a NEW TIME too.
+    // The proposal is staged (workout_edit_requests / change_time) and only
+    // lands in the schedule after the trainer approves it in ✅ Approvals.
+    html += window.renderClientTimeRow(cid, dateStr);
     banner.innerHTML = html;
+    window.bindClientTimeRow(dateStr);
     return;
   }
 
