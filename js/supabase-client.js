@@ -368,11 +368,48 @@ window.handleMissingColumnError = async function (err) {
   return false;
 };
 
-// Shared recovery for missing-table errors: tries to auto-provision the
+// Shared handler for missing-table errors: tries to auto-provision the
 // needed table(s), reloads app data on success, and always shows
 // a clear toast telling the user exactly what to do next. Returns true if the
 // caller should retry its action. Accepts an optional array of table names,
 // e.g. handleMissingWerTable(['workout_edit_requests']).
+
+// ------------------------------------------------------------
+// 🧯 LEGACY UNIQUE-CONSTRAINT HEALER (duplicate-key 23505)
+// Older deployments created workout_edit_requests with
+//   constraint "workout_edit_requests_client_id_session_date_key"
+//   UNIQUE (client_id, session_date)
+// which rejects a second proposal for the same day with
+//   'duplicate key value violates unique constraint ...'.
+// A day can now legitimately hold MANY pending proposals (time change +
+// exercise edits + removals), so the constraint is dropped and replaced by
+// a NON-unique helper index. Needs the service-role key in config; without
+// it the caller falls back to the sql/fix_wer_unique_constraint.sql file.
+// ------------------------------------------------------------
+window.isDuplicateKeyError = function (err) {
+  if (!err) return false;
+  const msg = String(err.message || err.details || '');
+  return err.code === '23505'
+    || /duplicate key value/i.test(msg)
+    || /already exists/i.test(msg);
+};
+
+const WER_CONSTRAINT_HEAL_SQL = [
+  'alter table public.workout_edit_requests drop constraint if exists "workout_edit_requests_client_id_session_date_key";',
+  'drop index if exists public.workout_edit_requests_client_id_session_date_key;',
+  'create index if not exists wer_client_date_idx on public.workout_edit_requests (client_id, session_date);'
+].join('\n');
+
+let _werHealInFlight = false;
+window.healWerUniqueConstraint = async function () {
+  if (_werHealInFlight) return false;
+  _werHealInFlight = true;
+  try {
+    return await execServiceSql(WER_CONSTRAINT_HEAL_SQL);
+  } catch (e) { return false; }
+  finally { _werHealInFlight = false; }
+};
+
 window.handleMissingWerTable = async function (tables) {
   const list = Array.isArray(tables) && tables.length ? tables : ['workout_edit_requests'];
   showToast('⚠️ Missing database table — trying to fix automatically…', 'warning', 3000);
@@ -452,6 +489,14 @@ const PROVISION_SQL = {
     '  requested_at timestamptz not null default now(),',
     '  decided_at timestamptz);',
     'create index if not exists wer_status_idx on public.workout_edit_requests (status);',
+    // 🧯 Self-heal: older DDL put a UNIQUE (client_id, session_date) on this
+    // table, which made the SECOND proposal of the same day fail with
+    // "duplicate key value violates unique constraint
+    //  workout_edit_requests_client_id_session_date_key". Drop it for good
+    // and keep only a NON-unique helper index.
+    'alter table public.workout_edit_requests drop constraint if exists "workout_edit_requests_client_id_session_date_key";',
+    'drop index if exists public.workout_edit_requests_client_id_session_date_key;',
+    'create index if not exists wer_client_date_idx on public.workout_edit_requests (client_id, session_date);',
     "alter table public.workout_edit_requests add column if not exists proposed_action text;",
     "alter table public.workout_edit_requests add column if not exists entry_log_id text;",
     "alter table public.workout_edit_requests add column if not exists proposed_data jsonb;",
