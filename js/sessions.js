@@ -28,10 +28,16 @@ window.submitWorkoutEditProposal = async function (opts) {
     status: 'pending',
     requested_at: new Date().toISOString()
   };
-  try {
+  // 🍞 One helper for every failure path of an insert:
+  //   • missing table  → auto-provision + retry once
+  //   • duplicate key  → heal the legacy DB constraint + retry once
+  //   • anything else  → friendly toast, no raw Postgres jargon
+  const doInsert = async () => {
     const { data: row, error } = await APP_STATE.supabaseClient
       .from('workout_edit_requests').insert(payload).select().single();
-    if (error) throw error;
+    return { row, error };
+  };
+  const stageRow = (row) => {
     (APP_STATE.workoutEditRequests = APP_STATE.workoutEditRequests || []).unshift(row || payload);
     showToast(action === 'delete'
       ? '🕓 Removal proposed — your trainer must approve it.'
@@ -43,10 +49,45 @@ window.submitWorkoutEditProposal = async function (opts) {
     if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
     if (typeof window.syncClientPendingBanner === 'function') window.syncClientPendingBanner();
     if (typeof renderClientUpcoming === 'function') renderClientUpcoming(c);
+  };
+  try {
+    let { row, error } = await doInsert();
+    if (error && window.isDuplicateKeyError && window.isDuplicateKeyError(error)) {
+      // Legacy DB constraint on (client_id, session_date) — one-per-day is
+      // outdated now that a day can hold several proposals. Heal + retry.
+      const healed = window.healWerUniqueConstraint
+        ? await window.healWerUniqueConstraint() : false;
+      if (healed) {
+        const retryRes = await doInsert();
+        if (!retryRes.error) { stageRow(retryRes.row); return true; }
+        error = retryRes.error;
+      }
+      if (window.isDuplicateKeyError(error)) {
+        showToast('🕓 A very similar proposal for this day was just sent — please wait for your trainer to review it.', 'info', 5000);
+        try { await loadAllData(); } catch (e) { /* ignore */ }
+        if (typeof renderClientUpcoming === 'function') renderClientUpcoming(c);
+        return false;
+      }
+    }
+    if (error) {
+      if (window.isMissingTableError && window.isMissingTableError(error)) {
+        const fixed = await window.handleMissingWerTable();
+        if (fixed) {
+          const retryRes = await doInsert();
+          if (!retryRes.error) { stageRow(retryRes.row); return true; }
+          if (retryRes.error) throw retryRes.error;
+        }
+        return false;
+      }
+      throw error;
+    }
+    stageRow(row);
     return true;
   } catch (err) {
     if (window.isMissingTableError && window.isMissingTableError(err)) {
       await window.handleMissingWerTable();
+    } else if (window.isDuplicateKeyError && window.isDuplicateKeyError(err)) {
+      showToast('🕓 This proposal is already waiting for your trainer — no need to send it twice.', 'info', 5000);
     } else {
       showToast('❌ Could not save your proposal: ' + (err.message || err), 'error', 6000);
     }
@@ -70,15 +111,42 @@ window.requestClassCancellation = async function (dateStr) {
     confirmText: '🚫 Request cancellation', danger: true
   });
   if (!ok) return;
-  const payload = {
-    client_id: c.id, session_date: dateStr,
-    proposed_action: 'cancel_class', proposed_data: {},
-    status: 'pending', requested_at: new Date().toISOString()
-  };
   try {
-    const { data, error } = await APP_STATE.supabaseClient
-      .from('workout_edit_requests').insert(payload).select().single();
-    if (error) throw error;
+    const payload = {
+      client_id: c.id, session_date: dateStr,
+      proposed_action: 'cancel_class', proposed_data: {},
+      status: 'pending', requested_at: new Date().toISOString()
+    };
+    const doInsert = async () => {
+      const { data, error } = await APP_STATE.supabaseClient
+        .from('workout_edit_requests').insert(payload).select().single();
+      return { data, error };
+    };
+    let { data, error } = await doInsert();
+    if (error && window.isDuplicateKeyError && window.isDuplicateKeyError(error)) {
+      // Legacy UNIQUE(client_id, session_date) constraint — heal + retry once.
+      const healed = window.healWerUniqueConstraint ? await window.healWerUniqueConstraint() : false;
+      if (healed) {
+        const retryRes = await doInsert();
+        if (!retryRes.error) data = retryRes.data; else error = retryRes.error;
+      }
+      if (error && window.isDuplicateKeyError(error)) {
+        showToast('🕓 A cancellation for this class is already waiting for your trainer.', 'info');
+        return;
+      }
+    }
+    if (error) {
+      if (window.isMissingTableError && window.isMissingTableError(error)) {
+        const fixed = await window.handleMissingWerTable();
+        if (fixed) {
+          const retryRes = await doInsert();
+          if (!retryRes.error) data = retryRes.data;
+          else { showToast('❌ Could not send the request: ' + (retryRes.error.message || ''), 'error', 6000); return; }
+        } else return;
+      } else {
+        throw error;
+      }
+    }
     (APP_STATE.workoutEditRequests = APP_STATE.workoutEditRequests || []).unshift(data || payload);
     showToast('🚫 Cancellation requested — waiting for trainer approval.', 'success', 4000);
     if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
@@ -86,6 +154,8 @@ window.requestClassCancellation = async function (dateStr) {
   } catch (err) {
     if (window.isMissingTableError && window.isMissingTableError(err)) {
       await window.handleMissingWerTable();
+    } else if (window.isDuplicateKeyError && window.isDuplicateKeyError(err)) {
+      showToast('🕓 A cancellation for this class is already waiting for your trainer.', 'info');
     } else {
       showToast('❌ Could not send the request: ' + (err.message || err), 'error', 6000);
     }

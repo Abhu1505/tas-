@@ -68,8 +68,37 @@ input,select,textarea,button{font-family:inherit;}
 ::selection{background:var(--brand-100);color:var(--brand-800);}
 
 #bgWatermark{position:fixed;inset:0;z-index:-1;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:hidden;}
-#bgWatermark img{width:110%;max-width:1500px;height:auto;object-fit:contain;opacity:0.10;filter:grayscale(20%);user-select:none;-webkit-user-drag:none;}
-#bgWatermark .gdrive-fallback{display:none !important;}
+/* 🖼️ The old Google-Drive background PHOTO is REMOVED — no image is loaded
+   into the watermark layer anymore. The background is now 100% animated CSS
+   (aurora orbs + gym grid + pulse rings + Apple-style sheen sweep below). */
+#bgWatermark img,#bgWatermark .gdrive-fallback{display:none !important;}
+
+/* 🍏 Apple-style specular SHEEN SWEEP — a wide, ultra-soft diagonal light
+   band that glides slowly across the whole viewport behind the content,
+   like the highlight sweeps on apple.com product sections. Pure CSS, GPU
+   friendly (transform only), click-through, and fully disabled for users
+   who prefer reduced motion (see the media query after the keyframes). */
+#bgWatermark .gym-sheen{position:absolute;top:-30%;bottom:-30%;left:0;width:46%;
+  pointer-events:none;z-index:1;opacity:.5;will-change:transform;
+  transform:translateX(-160%) rotate(14deg);
+  background:linear-gradient(100deg,transparent 0%,rgba(255,255,255,.05) 18%,
+    rgba(255,255,255,.30) 46%,rgba(255,255,255,.38) 52%,rgba(255,255,255,.30) 58%,
+    rgba(255,255,255,.05) 86%,transparent 100%);
+  filter:blur(34px);-webkit-filter:blur(34px);
+  animation:gymSheenSweep 13s cubic-bezier(.4,0,.2,1) infinite;}
+@keyframes gymSheenSweep{
+  0%   {transform:translateX(-160%) rotate(14deg);opacity:0;}
+  12%  {opacity:.5;}
+  70%  {opacity:.5;}
+  100% {transform:translateX(360%) rotate(14deg);opacity:0;}
+}
+[data-theme="dark"] #bgWatermark .gym-sheen{
+  background:linear-gradient(100deg,transparent 0%,rgba(127,178,216,.05) 18%,
+    rgba(160,205,240,.16) 46%,rgba(190,225,255,.22) 52%,rgba(160,205,240,.16) 58%,
+    rgba(127,178,216,.05) 86%,transparent 100%);}
+@media (prefers-reduced-motion:reduce){
+  #bgWatermark .gym-sheen{animation:none;opacity:.18;transform:translateX(-20%) rotate(14deg);}
+}
 
 /* ---- 🍏 Ambient animated background (Apple-style soft aurora) ----------
    Slow, blurred colour orbs drift behind the whole app — content-related
