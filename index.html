@@ -74,7 +74,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<link rel="stylesheet" href="css/styles.css?v=site-anim-v42">
+<link rel="stylesheet" href="css/styles.css?v=site-anim-v43">
 <script>/* Pre-paint theme: AUTO ONLY — always follows the local sunrise/sunset
    (Dubai fallback until geolocation resolves). The manual Light/Dark toggle
    button was removed, so any legacy 'tas_theme_mode' override stored in
@@ -128,10 +128,28 @@
   <span class="gym-grid"></span>
   <span class="gym-pulse p1"></span>
   <span class="gym-pulse p2"></span>
+  <!-- ✨ Floating energy particles + tiny dumbbells — pure CSS rise loop,
+       staggered via inline custom properties (--x/--s/--t/--d/--dx). -->
+  <span class="bg-particles" aria-hidden="true">
+    <i style="--x:6%;--s:9px;--t:24s;--d:0s;--dx:4vw;"></i>
+    <i class="b" style="--x:18%;--s:14px;--t:30s;--d:5s;--dx:-3vw;"></i>
+    <i class="c" style="--x:27%;--s:7px;--t:21s;--d:11s;--dx:5vw;"></i>
+    <i class="ex" style="--x:38%;--s:12px;--t:34s;--d:2s;--dx:-4vw;">🏋️</i>
+    <i style="--x:47%;--s:11px;--t:26s;--d:14s;--dx:3vw;"></i>
+    <i class="b" style="--x:56%;--s:8px;--t:22s;--d:7s;--dx:-5vw;"></i>
+    <i class="c" style="--x:66%;--s:13px;--t:31s;--d:17s;--dx:4vw;"></i>
+    <i class="ex g" style="--x:74%;--s:12px;--t:28s;--d:9s;--dx:-3vw;">💪</i>
+    <i style="--x:83%;--s:10px;--t:23s;--d:3s;--dx:5vw;"></i>
+    <i class="b" style="--x:92%;--s:15px;--t:33s;--d:12s;--dx:-4vw;"></i>
+    <i class="c" style="--x:12%;--s:6px;--t:19s;--d:20s;--dx:2vw;"></i>
+    <i style="--x:61%;--s:12px;--t:27s;--d:23s;--dx:-2vw;"></i>
+  </span>
   <svg class="wm-svg" viewBox="0 0 64 64"><use href="#tas-mark"/></svg>
   <!-- 🍏 Apple-style sheen sweep — replaces the old Google-Drive background
        photo entirely. Pure CSS animation (gymSheenSweep), no images. -->
   <span class="gym-sheen"></span>
+  <!-- 🔦 Soft spotlight beam sweeping across the page — pure CSS. -->
+  <span class="bg-beam"></span>
 </div>
 
 <div class="unified-wrap">
@@ -212,7 +230,7 @@
     </div>
     <div id="clientUpcomingBlock" class="client-upcoming-card">
       <div class="client-upcoming-title">📅 Your upcoming schedule</div>
-      <div class="client-upcoming-hint">Tap ✏️ Edit on any day to update your exercises — changes apply only after your trainer approves them. Tap 🚫 Cancel to cancel a class (needs trainer approval). Times are set by your trainer.</div>
+      <div class="client-upcoming-hint">Tap 👁 View on any day to see your plan and update your exercises — changes apply only after your trainer approves them. Tap 🚫 Cancel to cancel a class (needs trainer approval). Times are set by your trainer.</div>
       <div id="clientUpcomingList"></div>
       <div id="clientUpcomingNote" class="hidden client-upcoming-note"></div>
     </div>
@@ -220,7 +238,7 @@
       <summary class="howto-summary">ℹ️ How to use your portal — quick guide</summary>
       <ol class="howto-list">
         <li><strong>🏋️ My Plan</strong> shows every exercise your trainer assigned, with target sets × reps, weight and rest. The green bar tracks how many plan exercises you've completed in finished sessions.</li>
-        <li><strong>📅 Your upcoming schedule</strong> lists your next classes with the time set by your trainer. Tap <em>✏️ Edit</em> on any day to update your exercises — your edits are saved as proposals and only appear in the official log after your trainer approves them. Tap <em>🚫 Cancel</em> to cancel a class (the trainer's approval is needed before it disappears from the schedule). Times stay set by your trainer.</li>
+        <li><strong>📅 Your upcoming schedule</strong> lists your next classes with the time set by your trainer. Tap <em>👁 View</em> on any day to open it and update your exercises — your edits are saved as proposals and only appear in the official log after your trainer approves them. Tap <em>🚫 Cancel</em> to cancel a class (the trainer's approval is needed before it disappears from the schedule). Times stay set by your trainer.</li>
         <li><strong>🕓 Approval flow:</strong> cancelled-class requests show an "awaiting approval" chip until your trainer decides; they appear under ✅ Approvals → 📅 Schedule where the trainer approves or declines with a note.</li>
         <li><strong>✅ Everything is trainer-approved.</strong> Your exercise edits and class cancellations never apply directly — the trainer confirms them first, so the official log always stays accurate.</li>
         <li><strong>📜 History</strong> lists all your past workouts — both days with logged exercises and every finished session. Tap a day to expand it; use <em>✏️ Edit</em> to propose corrections.</li>
@@ -1105,9 +1123,9 @@
 <script src="js/reports.js"></script>
 <script src="js/workspace.js"></script>
 <!-- 👤 Screen/tab transition animations (direction-aware slides + sliding tab pill + Apple-style reveals) -->
-<script src="js/animations.js?v=site-anim-v42"></script>
+<script src="js/animations.js?v=site-anim-v43"></script>
 <!-- 🍏 Apple-style number roll-ups for the training KPIs (sessions, revenue, approvals…) -->
-<script src="js/counters.js?v=site-anim-v42"></script>
+<script src="js/counters.js?v=site-anim-v43"></script>
 <script src="js/wipe.js"></script>
 <!-- 🔄 Removed: update-site.js ("Update Site" button / What's New watcher) — it interfered with page loading. -->
 <script src="js/pwa.js"></script>

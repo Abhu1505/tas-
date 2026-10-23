@@ -754,12 +754,12 @@ window.renderClientUpcoming = function (c) {
       let actionBtn = '';
       if (pendEdits.length > 0) actionBtn += `<span class="lock-status-chip">🕓 ${pendEdits.length} pending</span>`;
       if (pendingCancelDates[it.dateStr]) actionBtn += `<span class="lock-status-chip">🚫 Cancel ⏳ awaiting approval</span>`;
-      // ✏️ Edit + 🚫 Cancel on every OPEN day — the hint text promised these
-      // buttons but they were never rendered (root cause of "client view is
-      // not working"). Finished days stay view-only.
+      // ✏️ Edit REMOVED from "📅 Your upcoming schedule" per user request —
+      // 👁 View already opens the same draft editor on open days, so the
+      // separate Edit button was redundant. Only 🕐 Edit time + 🚫 Cancel
+      // remain on open days; finished days keep just 🕐 Edit time.
       if (!it.done && !pendingCancelDates[it.dateStr]) {
         actionBtn += `<button class="btn-secondary btn-small client-upcoming-edit-time" data-date="${it.dateStr}" title="Propose a new class time — your trainer must approve it">🕐 Edit time</button>
-          <button class="btn-secondary btn-small client-upcoming-edit" data-date="${it.dateStr}" title="Propose exercise changes for this day">✏️ Edit</button>
           <button class="btn-danger-small btn-small client-upcoming-cancel" data-date="${it.dateStr}" title="Ask your trainer to cancel this class">🚫 Cancel</button>`;
       } else if (it.done) {
         // ✅ Finished sessions can also get a proposed NEW TIME — but only
@@ -780,8 +780,24 @@ window.renderClientUpcoming = function (c) {
     });
   }
   container.innerHTML = html;
+  // 👁 View used to "not work" whenever the day fell outside the currently
+  // viewed month: openDayLogModal() rebuilds its date from getViewYearMonth()
+  // (selectedYear/selectedMonth), which still pointed at another month — so
+  // the sheet opened showing the wrong day. openClientDayLog sets those now,
+  // but we also re-sync them here from the tapped row's own ISO date.
   container.querySelectorAll('.client-upcoming-open').forEach(btn =>
-    btn.addEventListener('click', (e) => { e.stopPropagation(); openClientDayLog(btn.dataset.date); }));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ymd = String(btn.dataset.date || '').split('-').map(Number);
+      if (ymd.length === 3 && !ymd.some(isNaN)) {
+        APP_STATE.selectedYear = ymd[0];
+        APP_STATE.selectedMonth = ymd[1] - 1;
+        APP_STATE.selectedDay = ymd[2];
+      }
+      openClientDayLog(btn.dataset.date);
+    }));
+  // (✏️ Edit button removed from this section — the listener below stays as a
+  // harmless no-op in case an older cached copy of this file renders it.)
   container.querySelectorAll('.client-upcoming-edit').forEach(btn =>
     btn.addEventListener('click', (e) => { e.stopPropagation(); openClientDayLog(btn.dataset.date); }));
   container.querySelectorAll('.client-upcoming-cancel').forEach(btn =>
