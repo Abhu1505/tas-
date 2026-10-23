@@ -21,5 +21,14 @@ window.APP_CONFIG = {
   WIPE_ADMIN_CONFIG_ROW: false,
   // Always use the URL currently open in the browser (works on localhost, Netlify preview, and production)
   get LOGIN_URL() { return window.location.href.split('#')[0]; },
-  LOGO_FILE_ID: '1N651kHeVrz6HEhAc1cRRKGx2DtS-IdX0'
+  LOGO_FILE_ID: '1N651kHeVrz6HEhAc1cRRKGx2DtS-IdX0',
+  // ---- 💳 PAYMENTS (see js/payments.js) --------------------------------
+  // Optional payment provider for the client portal's "Pay For Your
+  // Sessions" card. Leave empty to use the built-in offline/cash ledger
+  // (the amount due still works and only clears after a recorded payment).
+  //   'stripe'            → Apple Pay + Google Pay + Card buttons via Stripe
+  //   'apple_pay_direct'  → native Apple Pay JS (needs APPLE_PAY_MERCHANT_ID)
+  PAYMENT_PROVIDER: '',
+  STRIPE_PUBLISHABLE_KEY: '',        // pk_live_… / pk_test_… (Stripe only)
+  APPLE_PAY_MERCHANT_ID: ''          // merchant.com.yourdomain (Apple Pay Direct only)
 };

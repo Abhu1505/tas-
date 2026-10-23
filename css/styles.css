@@ -2346,3 +2346,58 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
   .js-anim .chart-svg polyline,.js-anim .chart-svg path.line{stroke-dashoffset:0 !important;}
 }
 
+
+/* ============================================================
+   💳 PAYMENTS — client portal "Pay For Your Sessions" card
+   (js/payments.js). Theme-aware, mobile-first.
+   ============================================================ */
+.payment-section-card{border-left:4px solid var(--brand,#1f4e3d);}
+.payment-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.35rem;}
+.payment-badge{font-size:.78rem;font-weight:800;padding:.28rem .7rem;border-radius:999px;letter-spacing:.02em;}
+.payment-badge.due{background:#fdf0d5;color:#8a5b00;}
+.payment-badge.paid{background:#dcf5e4;color:#136c3a;}
+[data-theme="dark"] .payment-badge.due{background:#4a3a12;color:#ffd47e;}
+[data-theme="dark"] .payment-badge.paid{background:#123f26;color:#7fe0a8;}
+.payment-breakdown{margin:.6rem 0 .2rem;display:flex;flex-direction:column;gap:.3rem;}
+.payment-line{display:flex;justify-content:space-between;gap:.75rem;font-size:.9rem;color:var(--ink-soft,#333);padding:.35rem .55rem;background:var(--surface,#fff);border:1px solid var(--line,#e3e8ee);border-radius:10px;}
+.payment-line.carry{border-style:dashed;background:transparent;}
+.payment-carry-title{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#b3541e;margin-top:.45rem;}
+.payment-total-row{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin:.65rem 0;padding:.6rem .7rem;border-radius:12px;background:linear-gradient(135deg,rgba(31,78,61,.08),rgba(31,78,61,.02));border:1.5px solid var(--brand,#1f4e3d);}
+.payment-total-row span{font-weight:700;}
+.payment-total-row strong.due{color:#b3541e;font-size:1.15rem;}
+.payment-total-row strong.zero{color:#136c3a;}
+.payment-methods{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.5rem;}
+.pay-method-btn{appearance:none;border:none;cursor:pointer;font-weight:800;font-size:.92rem;border-radius:12px;padding:.68rem 1.05rem;display:inline-flex;align-items:center;gap:.4rem;transition:transform .12s ease,filter .12s ease,box-shadow .12s ease;color:#fff;box-shadow:0 6px 16px -8px rgba(0,0,0,.45);}
+.pay-method-btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06);}
+.pay-method-btn:active:not(:disabled){transform:translateY(0);}
+.pay-method-btn:disabled{opacity:.55;cursor:not-allowed;box-shadow:none;}
+.pay-method-btn .pm-logo{width:1.05em;height:1.05em;background:currentColor;-webkit-mask:var(--apple-mark) center/contain no-repeat;mask:var(--apple-mark) center/contain no-repeat;display:inline-block;}
+.pm-note{font-weight:600;opacity:.85;font-size:.82em;}
+/*  Apple Pay button — black, Apple-styled */
+.pay-apple{--apple-mark:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M17.05 12.54c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.1-2.02-3.77-2.05-1.6-.16-3.13.94-3.94.94-.81 0-2.07-.92-3.4-.9-1.75.03-3.36 1.02-4.26 2.58-1.82 3.16-.47 7.83 1.31 10.39.88 1.26 1.93 2.67 3.3 2.62 1.33-.05 1.83-.86 3.43-.86 1.6 0 2.06.86 3.46.83 1.42-.02 2.32-1.28 3.19-2.55 1-1.46 1.42-2.87 1.44-2.94-.03-.01-2.77-1.07-2.79-4.23zM14.6 4.79c.72-.88 1.21-2.09 1.08-3.3-1.04.04-2.31.7-3.06 1.57-.67.77-1.26 2.01-1.1 3.19 1.16.09 2.35-.59 3.08-1.46z'/></svg>");background:#000;color:#fff;}
+.pay-apple .pm-with{font-weight:800;}
+/* Google Pay button — white with multicolour wordmark letters */
+.pay-google{background:#fff;color:#3c4043;border:1.5px solid #dadce0;}
+.pay-google b{color:#4285f4;font-weight:800;}
+.pay-google .g-c1{color:#ea4335;font-weight:800;}
+.pay-google .g-c2{color:#fbbc05;font-weight:800;}
+.pay-google .g-c3{color:#4285f4;font-weight:800;}
+.pay-google .g-c4{color:#34a853;font-weight:800;}
+.pay-google .g-c5{color:#ea4335;font-weight:800;}
+/* Card + offline buttons */
+.pay-card{background:linear-gradient(135deg,#1d4e6d,#2c6fa5);}
+.pay-offline{background:var(--grad-steel,#1f4e3d);}
+[data-theme="dark"] .pay-google{background:#f8f9fa;}
+/* Payment history */
+.payment-history-wrap{margin-top:.85rem;}
+.payment-history-title{font-size:.8rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft,#555);margin-bottom:.35rem;}
+.payment-history-list{display:flex;flex-direction:column;gap:.3rem;max-height:220px;overflow:auto;}
+.payment-history-row{display:grid;grid-template-columns:1fr auto auto auto;gap:.6rem;align-items:center;font-size:.82rem;padding:.4rem .55rem;border:1px solid var(--line,#e3e8ee);border-radius:9px;background:var(--surface,#fff);}
+.payment-history-row .ph-amt{font-weight:800;}
+.payment-history-row .ph-status.paid{color:#136c3a;font-weight:800;font-size:.72rem;letter-spacing:.04em;}
+.payment-history-empty{font-size:.82rem;color:var(--ink-soft,#777);padding:.4rem 0;}
+/* Stripe card modal wrapper */
+.tas-card-modal{position:fixed;inset:0;background:rgba(10,20,15,.55);display:flex;align-items:center;justify-content:center;z-index:1200;padding:1rem;}
+.tas-card-modal.hidden{display:none;}
+.tas-card-modal-card{background:var(--surface,#fff);color:var(--ink,#222);border-radius:16px;padding:1.1rem 1.2rem;max-width:420px;width:100%;box-shadow:0 24px 60px -20px rgba(0,0,0,.5);}
+@media (max-width:560px){.payment-methods .pay-method-btn{flex:1 1 100%;justify-content:center;}}

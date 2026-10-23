@@ -82,6 +82,7 @@
         .on('postgres_changes', { schema: 'public', event: '*', table: 'client_profiles' }, p => scheduleLiveReload(p))
         .on('postgres_changes', { schema: 'public', event: '*', table: 'clients' }, p => scheduleLiveReload(p))
         .on('postgres_changes', { schema: 'public', event: '*', table: 'client_requests' }, p => scheduleLiveReload(p))
+        .on('postgres_changes', { schema: 'public', event: '*', table: 'client_payments' }, p => scheduleLiveReload(p))
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') console.info('📡 Live sync active.');
           else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
