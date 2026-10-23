@@ -6,7 +6,8 @@
 -- "Pay For Your Sessions" card (js/payments.js) and adds the bank /
 -- PayPal detail columns to `admin_config`, so the trainer can update
 -- their account details from the admin panel without redeploying.
--- All payments are DIRECT-TO-COACH (bank transfer / PayPal.me) — no
+-- All payments are DIRECT-TO-COACH (bank transfer / PayPal.me, where clients
+-- can pay with Visa/Mastercard, Apple Pay or Samsung Pay for free) — no
 -- third-party gateway or API keys involved.
 -- Until this file is run, payments are stored locally (localStorage)
 -- and queued for sync; the portal keeps working either way.

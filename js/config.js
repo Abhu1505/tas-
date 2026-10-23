@@ -41,6 +41,9 @@ window.APP_CONFIG = {
   BANK_SWIFT: '',                    // optional SWIFT/BIC for int'l transfers
   BANK_UPI_ID: '',                   // optional UPI ID for Indian clients
   // PayPal.me link — another direct option: pays straight into your PayPal.
+  // Clients in any country can then pay inside PayPal with their linked
+  // Visa/Mastercard, Apple Pay or Samsung Pay — free for personal accounts,
+  // no API keys, money lands directly in your PayPal.
   // e.g. 'https://paypal.me/yourhandle'. Leave '' to hide the button.
   PAYPAL_ME_LINK: ''
 };
