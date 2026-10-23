@@ -346,8 +346,12 @@ window.decideWorkoutEditRequest = async function (id, clientId, dateStr, decisio
         ? `Cancel the class on ${dateStr}? It will be removed from the client's schedule and billing.`
         : action === 'unlock'
           ? `Unlock the workout log for ${dateStr} so the client can edit it?`
-          : `Apply the client's proposed change (${action}) to the official log for ${dateStr}?`)
-      : `Deny the edit request for ${dateStr}?`,
+          : action === 'change_time'
+            ? `Approve the client's proposed time ⏰ ${(req.proposed_data || {}).class_time || '—'} for ${dateStr}? It becomes the official class time immediately.`
+            : `Apply the client's proposed change (${action}) to the official log for ${dateStr}?`)
+      : (action === 'change_time'
+        ? `Decline the client's proposed new time for ${dateStr}? The schedule keeps the current time.`
+        : `Deny the edit request for ${dateStr}?`),
     confirmText: decision === 'approved' ? '✅ Approve' : '❌ Deny',
     danger: decision !== 'approved'
   });
@@ -374,7 +378,27 @@ window.decideWorkoutEditRequest = async function (id, clientId, dateStr, decisio
       const pd = req.proposed_data || {};
       const k = `${clientId}-${dateStr}`;
       const arr = APP_STATE.workoutLogsCache[k] || (APP_STATE.workoutLogsCache[k] = []);
-      if (action === 'edit' && req.entry_log_id) {
+      if (action === 'change_time') {
+        // 🕐 Client proposed a new class time on "Your upcoming schedule".
+        // On approval it becomes official: upsert daily_times + update the
+        // local cache so every view shows the new time immediately. The
+        // client's own portal picks it up within one 10s poll tick / via
+        // Realtime and fires the ⏰ "Class time updated" alert.
+        const newT = pd.class_time || null;
+        try {
+          const { error: dtErr } = await sb.from('daily_times').upsert(
+            [{ client_id: clientId, day_date: dateStr, class_time: newT }],
+            { onConflict: 'client_id,day_date' });
+          if (dtErr) throw dtErr;
+        } catch (e) {
+          if (!/daily_times|schema|does not exist|Could not find/i.test(String(e.message || ''))) throw e;
+        }
+        const dtArr = clientMapGet(APP_STATE.dailyTimesCache, clientId) || [];
+        const di = dtArr.findIndex(d => d.day_date === dateStr);
+        if (di >= 0) dtArr[di] = { ...dtArr[di], class_time: newT };
+        else dtArr.push({ client_id: clientId, day_date: dateStr, class_time: newT, note: null });
+        clientMapSet(APP_STATE.dailyTimesCache, clientId, dtArr);
+      } else if (action === 'edit' && req.entry_log_id) {
         const { error } = await sb.from('workout_logs').update(pd).eq('id', req.entry_log_id);
         if (error) throw error;
         const idx = arr.findIndex(w => String(w.id) === String(req.entry_log_id));
