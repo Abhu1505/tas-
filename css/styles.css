@@ -2529,3 +2529,99 @@ input.calc-input[type=number]{-moz-appearance:textfield;}
 .payment-coach-details.coach-reveal{animation:coachRevealIn .28s ease both;}
 @keyframes coachRevealIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 @media (prefers-reduced-motion:reduce){.payment-coach-details.coach-reveal{animation:none;}}
+
+/* ============================================================
+   ✨ ANIMATED SITE STYLE v43  (user request: "remove the background
+   image, replace it with a nice animation, give the site an animated
+   style overall")
+   ------------------------------------------------------------
+   • NO background IMAGE anywhere — #bgWatermark only ever renders pure
+     CSS animations (aurora orbs, gliding gym grid, pulse rings, sheen).
+     This block adds two more GPU-friendly layers to that stack:
+       – .bg-particles : floating energy dots + tiny dumbbells rising
+         slowly like bubbles in an aurora.
+       – .bg-beam      : a soft spotlight beam sweeping across the page.
+   • Every card gets a slow living "breathing" glow and a lift-on-hover.
+   • Primary buttons shimmer; headings get a gently animated gradient.
+   All motion is transform/opacity/filter only (cheap), respects
+   prefers-reduced-motion, and degrades to a static theme if CSS
+   animations are unsupported.
+   ============================================================ */
+
+/* ---- Floating particle layer (pure CSS, no JS) ---- */
+#bgWatermark .bg-particles{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;}
+#bgWatermark .bg-particles i{position:absolute;bottom:-12vh;left:var(--x);width:var(--s,10px);height:var(--s,10px);
+  border-radius:50%;opacity:0;will-change:transform,opacity;
+  background:radial-gradient(closest-side,rgba(43,110,158,.5),rgba(43,110,158,0) 75%);
+  animation:bgFloatUp var(--t,20s) linear var(--d,0s) infinite;}
+#bgWatermark .bg-particles i.b{background:radial-gradient(closest-side,rgba(31,157,92,.45),rgba(31,157,92,0) 75%);}
+#bgWatermark .bg-particles i.c{background:radial-gradient(closest-side,rgba(232,118,39,.4),rgba(232,118,39,0) 75%);}
+/* two of the "particles" are tiny dumbbell glyphs for the gym flavour */
+#bgWatermark .bg-particles i.ex{border-radius:0;background:none;color:rgba(43,110,158,.35);font-size:calc(var(--s,10px)*1.6);
+  line-height:1;display:flex;align-items:center;justify-content:center;text-shadow:0 0 12px rgba(43,110,158,.25);}
+#bgWatermark .bg-particles i.ex.g{color:rgba(31,157,92,.32);}
+@keyframes bgFloatUp{
+  0%  {transform:translate3d(0,0,0) rotate(0deg) scale(.7);opacity:0;}
+  12% {opacity:.85;}
+  85% {opacity:.5;}
+  100%{transform:translate3d(var(--dx,3vw),-118vh,0) rotate(36deg) scale(1.05);opacity:0;}
+}
+
+/* ---- Sweeping spotlight beam ---- */
+#bgWatermark .bg-beam{position:absolute;top:-25%;left:-30%;width:34%;height:150%;z-index:1;pointer-events:none;opacity:.4;
+  transform:rotate(18deg);will-change:transform,opacity;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.34) 45%,rgba(255,255,255,.5) 50%,rgba(255,255,255,.34) 55%,transparent);
+  filter:blur(46px);-webkit-filter:blur(46px);
+  animation:bgBeamSweep 17s cubic-bezier(.45,0,.35,1) infinite;}
+[data-theme="dark"] #bgWatermark .bg-beam{opacity:.22;
+  background:linear-gradient(90deg,transparent,rgba(127,178,216,.16) 45%,rgba(160,205,240,.26) 50%,rgba(127,178,216,.16) 55%,transparent);}
+@keyframes bgBeamSweep{
+  0%  {transform:translateX(-40%) rotate(18deg);opacity:0;}
+  15% {opacity:.4;}
+  80% {opacity:.35;}
+  100%{transform:translateX(420%) rotate(18deg);opacity:0;}
+}
+
+/* ---- Living cards: gentle breathing glow + hover lift ---- */
+.card,.dash-card,.section-card,.client-upcoming-card,.howto-card{animation:cardBreathe 9s ease-in-out infinite;}
+@keyframes cardBreathe{
+  0%,100%{box-shadow:var(--shadow-lg);}
+  50%    {box-shadow:var(--shadow-xl),0 0 0 1px rgba(43,110,158,.10);}
+}
+.card:hover,.dash-card:hover,.section-card:hover{transform:translateY(-3px);transition:transform .25s var(--ease),box-shadow .25s var(--ease);}
+.dash-header,.stat-tile{animation:tileFloat 7s ease-in-out infinite;}
+@keyframes tileFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-2px);}}
+
+/* ---- Animated gradient headings (subtle, always legible) ---- */
+.client-upcoming-title,.howto-summary,.login-card h1,.login-card h2,.dash-title{
+  background:linear-gradient(90deg,var(--steel-700),var(--brand-600),var(--steel-500),var(--brand-600),var(--steel-700));
+  background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:titleFlow 8s linear infinite;}
+@keyframes titleFlow{from{background-position:0% 0;}to{background-position:300% 0;}}
+
+/* ---- Shimmering primary/action buttons ---- */
+.btn-primary,.btn-admin,.btn-whatsapp,.btn-email,.btn-send-all-top{position:relative;overflow:hidden;}
+.btn-primary::after,.btn-admin::after,.btn-whatsapp::after,.btn-email::after,.btn-send-all-top::after{
+  content:"";position:absolute;top:0;bottom:0;left:-60%;width:40%;pointer-events:none;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.5),transparent);
+  transform:skewX(-18deg);animation:btnShine 4.5s ease-in-out infinite;}
+@keyframes btnShine{0%{left:-60%;}55%{left:130%;}100%{left:130%;}}
+button:not(.btn-primary):not(:disabled):hover{transform:translateY(-1px) scale(1.015);}
+button:not(:disabled):active{transform:translateY(0) scale(.98);}
+
+/* ---- Upcoming-schedule rows glide on hover ---- */
+.client-upcoming-item{transition:transform .22s var(--ease),box-shadow .22s var(--ease);}
+.client-upcoming-item:hover{transform:translateX(4px);box-shadow:var(--shadow-md);}
+
+/* ---- Reduced motion: everything settles into a calm static theme ---- */
+@media (prefers-reduced-motion:reduce){
+  #bgWatermark .bg-particles i,#bgWatermark .bg-beam,
+  .card,.dash-card,.section-card,.client-upcoming-card,.howto-card,
+  .dash-header,.stat-tile,.client-upcoming-title,.howto-summary,
+  .login-card h1,.login-card h2,.dash-title,
+  .btn-primary::after,.btn-admin::after,.btn-whatsapp::after,.btn-email::after,.btn-send-all-top::after{
+    animation:none !important;}
+  #bgWatermark .bg-particles{display:none;}
+  #bgWatermark .bg-beam{opacity:.12;transform:rotate(18deg);}
+  .card:hover,.dash-card:hover,.section-card:hover,.client-upcoming-item:hover{transform:none;}
+}
