@@ -204,10 +204,18 @@ window.initClientLogViewer = function () {
 // Open the day-log modal for a specific ISO date from the client portal.
 // Works across month boundaries (the admin grid is single-month, so we set
 // selectedMonth/selectedDay accordingly before reusing the same modal).
-// Clients get a READ-ONLY view of their approved log — the trainer maintains it.
+// Clients get an EDITABLE draft view on OPEN days: every change they make is
+// staged as a proposal (workout_edit_requests) and applied only after the
+// trainer approves. Finished days stay read-only.
 window.openClientDayLog = function (dateStr) {
   const c = APP_STATE.loggedInClient;
   if (!c || !dateStr) return;
+  // BUG FIX: previously tapping 👁 View / ✏️ Edit did nothing visible when the
+  // cloud data hadn't finished loading yet — now we tell the user why.
+  if (APP_STATE.workoutLogsCache === null || !APP_STATE.supabaseClient) {
+    showToast('⏳ Still connecting to the cloud — try again in a second.', 'warning', 3500);
+    return;
+  }
   const parts = dateStr.split('-').map(Number);
   APP_STATE.selectedClientId = c.id;
   APP_STATE.selectedYear = parts[0];
@@ -216,28 +224,118 @@ window.openClientDayLog = function (dateStr) {
   openDayLogModal(parts[2]);
   if (!APP_STATE.loggedInClient) return;
 
+  const finished = isSessionCheckedForDate(c.id, dateStr);
+  const pendEdits = typeof getPendingLogEditsFor === 'function'
+    ? getPendingLogEditsFor(c.id, dateStr) : [];
+
+  // Overlay click-handlers in main.js call the admin add/remove paths which
+  // refuse client writes — swap them for the proposal flow BEFORE re-render.
+  if (!finished) installClientAddGuards(dateStr);
+  renderDayLogExisting(dateStr);
+  renderDayLogChips();
+
   const body = $('addExerciseBody');
-  if (body) body.classList.add('hidden');
   const toggle = $('addExerciseToggleBtn');
-  if (toggle) toggle.style.display = 'none';
-
-  document.querySelectorAll('#dayLogModal input, #dayLogModal select, #dayLogModal textarea')
-    .forEach(el => { el.disabled = true; });
-  document.querySelectorAll('#dayLogModal .remove-log-btn, #dayLogModal .library-chip')
-    .forEach(el => el.remove());
-
   const freeRow = $('freeExName') ? $('freeExName').closest('.free-add-row') : null;
-  if (freeRow) freeRow.style.display = 'none';
 
+  if (finished) {
+    // Official log of a FINISHED session stays locked for clients.
+    if (body) body.classList.add('hidden');
+    if (toggle) toggle.style.display = 'none';
+    if (freeRow) freeRow.style.display = 'none';
+    document.querySelectorAll('#dayLogModal input, #dayLogModal select, #dayLogModal textarea')
+      .forEach(el => { el.disabled = true; });
+    document.querySelectorAll('#dayLogModal .remove-log-btn, #dayLogModal .library-chip')
+      .forEach(el => el.remove());
+  } else {
+    // OPEN day → editable draft: live inputs + ➕ add controls stay visible;
+    // every change is staged as a trainer-approval proposal.
+    if (body) body.classList.remove('hidden');
+    if (toggle) toggle.style.display = '';
+    if (freeRow) freeRow.style.display = '';
+    bindClientDayLogProposals(dateStr);
+  }
+
+  // Banner rebuilt via innerHTML every open — appending used to stack
+  // duplicate banners with stale state.
   const banner = $('dayLogLockBanner');
   if (banner) {
-    const d = document.createElement('div');
-    d.className = 'day-open-banner';
-    d.style.cssText = 'display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-top:0.4rem;';
-    d.innerHTML = `👁 Read-only view of your approved log. Need a change? Ask your trainer.`;
-    banner.appendChild(d);
+    let html = '';
+    if (finished) {
+      html += `<div class="day-lock-banner"><div class="day-lock-text"><strong>✅ Finished session — official log locked.</strong><br>Need a correction? Ask your trainer to update it.</div></div>`;
+    } else {
+      html += `<div class="day-open-banner">✏️ Draft view — changes you make here are saved as proposals and apply to your official log only after your trainer approves them.</div>`;
+    }
+    if (pendEdits.length > 0) {
+      html += `<div style="margin-top:.35rem;"><span class="lock-status-chip">🕓 ${pendEdits.length} change${pendEdits.length > 1 ? 's' : ''} waiting for trainer approval</span></div>`;
+    }
+    banner.innerHTML = html;
   }
 };
+
+// Wire the client's day-log modal so field edits / removals / additions become
+// PROPOSALS instead of direct writes. Uses `onclick`/`onchange` assignment
+// (not addEventListener) so re-renders never double-fire.
+function bindClientDayLogProposals(dateStr) {
+  const modal = $('dayLogModal');
+  if (!modal) return;
+
+  modal.querySelectorAll('.log-field').forEach(input => {
+    input.onchange = async () => {
+      if (!APP_STATE.loggedInClient) return;
+      const entry = input.closest('.exercise-entry');
+      if (!entry) return;
+      await window.submitWorkoutEditProposal({
+        session_date: dateStr,
+        entry_log_id: entry.dataset.logId,
+        action: 'edit',
+        proposed_data: { [input.dataset.field]: input.value || null }
+      });
+    };
+  });
+  modal.querySelectorAll('.remove-log-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (!APP_STATE.loggedInClient) return;
+      if (!await uiConfirm({ title: 'Remove Exercise', message: 'Propose removing this exercise from the day? Your trainer must approve it first.', confirmText: '🚫 Propose removal', danger: true })) return;
+      await window.submitWorkoutEditProposal({
+        session_date: dateStr,
+        entry_log_id: btn.dataset.logId,
+        action: 'delete'
+      });
+      openClientDayLog(dateStr);
+    };
+  });
+}
+
+// Redirect the ➕ Add buttons (library chip flow + custom-name flow) to the
+// proposal path for clients on open days. Assigned via .onclick so they win
+// over the admin handlers bound with addEventListener in main.js.
+function installClientAddGuards(dateStr) {
+  const libBtn = $('libAddExerciseBtn');
+  const freeBtn = $('freeAddBtn');
+  if (libBtn) libBtn.onclick = async () => {
+    const exSel = $('libExerciseSelect');
+    const name = exSel && exSel.value
+      ? ((exSel.options[exSel.selectedIndex] || {}).textContent || '').trim() : '';
+    if (!name) { showToast('⚠️ Pick an exercise from the dropdown first.', 'warning'); return; }
+    await window.submitWorkoutEditProposal({
+      session_date: dateStr, action: 'add',
+      proposed_data: { exercise_name: name }
+    });
+    openClientDayLog(dateStr);
+  };
+  if (freeBtn) freeBtn.onclick = async () => {
+    const nameEl = $('freeExName');
+    const name = nameEl ? nameEl.value.trim() : '';
+    if (!name) { showToast('⚠️ Type an exercise name first.', 'warning'); return; }
+    await window.submitWorkoutEditProposal({
+      session_date: dateStr, action: 'add',
+      proposed_data: { exercise_name: name }
+    });
+    if (nameEl) nameEl.value = '';
+    openClientDayLog(dateStr);
+  };
+}
 
 window.renderClientPlan = function (c, assignedOverride) {
   const container = $('clientPlanList');
@@ -608,7 +706,18 @@ window.renderClientUpcoming = function (c) {
     }
   });
   let html = '';
-  const visible = items.filter(it => decidedCancels[it.dateStr] !== 'approved');
+  const visible = items.filter(it => {
+    // Approved cancellations hide the day; pending ones keep it visible with
+    // a 🕓 chip so the client sees the request is awaiting the trainer.
+    const dc = decidedCancels[it.dateStr];
+    return dc !== 'approved' && dc !== 'pending';
+  });
+  const pendingCancelDates = {};
+  (APP_STATE.clientRequests || []).forEach(r => {
+    if (sameId(r.client_id, c.id) && r.request_type === 'cancel' && r.session_date && r.status === 'pending') {
+      pendingCancelDates[r.session_date] = true;
+    }
+  });
   if (visible.length === 0) {
     html = `<div class="client-upcoming-empty">📭 No classes scheduled in the next few days yet.<br>
       <span>Your trainer will set your upcoming session times here.</span></div>`;
@@ -625,6 +734,14 @@ window.renderClientUpcoming = function (c) {
         ? getPendingLogEditsFor(c.id, it.dateStr) : [];
       let actionBtn = '';
       if (pendEdits.length > 0) actionBtn += `<span class="lock-status-chip">🕓 ${pendEdits.length} pending</span>`;
+      if (pendingCancelDates[it.dateStr]) actionBtn += `<span class="lock-status-chip">🚫 Cancel ⏳ awaiting approval</span>`;
+      // ✏️ Edit + 🚫 Cancel on every OPEN day — the hint text promised these
+      // buttons but they were never rendered (root cause of "client view is
+      // not working"). Finished days stay view-only.
+      if (!it.done && !pendingCancelDates[it.dateStr]) {
+        actionBtn += `<button class="btn-secondary btn-small client-upcoming-edit" data-date="${it.dateStr}" title="Propose exercise changes for this day">✏️ Edit</button>
+          <button class="btn-danger-small btn-small client-upcoming-cancel" data-date="${it.dateStr}" title="Ask your trainer to cancel this class">🚫 Cancel</button>`;
+      }
       html += `<div class="client-upcoming-item ${it.done ? 'done' : 'open'}" data-date="${it.dateStr}">
         <span class="client-upcoming-icon">${it.done ? '✅' : '📅'}</span>
         <div class="client-upcoming-body">
@@ -632,7 +749,7 @@ window.renderClientUpcoming = function (c) {
           <div class="client-upcoming-sub">${timeHtml}${it.note ? ` · 📝 ${escapeHtml(it.note)}` : ''}</div>
         </div>
         <div class="client-upcoming-actions">
-          <button class="btn-secondary btn-small client-upcoming-open" data-date="${it.dateStr}" title="Read-only view of this day's plan & log">👁 View</button>
+          <button class="btn-secondary btn-small client-upcoming-open" data-date="${it.dateStr}" title="${it.done ? 'Read-only view of this day' : 'Open your draft editor for this day'}">👁 View</button>
           ${actionBtn}
         </div>
       </div>`;
@@ -641,6 +758,13 @@ window.renderClientUpcoming = function (c) {
   container.innerHTML = html;
   container.querySelectorAll('.client-upcoming-open').forEach(btn =>
     btn.addEventListener('click', (e) => { e.stopPropagation(); openClientDayLog(btn.dataset.date); }));
+  container.querySelectorAll('.client-upcoming-edit').forEach(btn =>
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openClientDayLog(btn.dataset.date); }));
+  container.querySelectorAll('.client-upcoming-cancel').forEach(btn =>
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.requestClassCancellation(btn.dataset.date);
+    }));
   container.querySelectorAll('.client-upcoming-item[data-date]').forEach(item =>
     item.addEventListener('dblclick', () => openClientDayLog(item.dataset.date)));
 

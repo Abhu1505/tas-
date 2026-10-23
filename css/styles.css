@@ -566,6 +566,10 @@ button:disabled{opacity:0.55;cursor:not-allowed;}
 .session-card.is-today{background:var(--warning-bg);border-color:var(--warning-border);}
 .session-card label{display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.8rem;font-weight:600;color:var(--steel-800);text-transform:none;letter-spacing:0;margin-bottom:0.25rem;}
 .session-card input[type="checkbox"]{width:17px;height:17px;accent-color:var(--brand-700);cursor:pointer;min-height:auto;flex-shrink:0;}
+/* BUG FIX: the global `input{appearance:none;...}` rule stripped native checkbox
+   rendering inside the bank-transfer modal, leaving an invisible/blank box next to
+   "I have transferred …". Restore a real, visible checkbox for that modal. */
+#tasBankDone,.tas-card-modal input[type="checkbox"],.admin-unlock-toggle input[type="checkbox"]{-webkit-appearance:checkbox;appearance:auto;width:20px;height:20px;min-height:auto;padding:0;flex-shrink:0;accent-color:var(--brand-700,#e8730c);cursor:pointer;margin:0;background:var(--surface,#fff);border:1.5px solid var(--line,#d5dbe2);border-radius:4px;}
 .session-date{font-size:0.68rem;color:var(--ink-soft);margin-left:1.6rem;}
 .session-today-badge{background:#ff9800;color:#fff;font-size:0.6rem;font-weight:800;padding:0.15rem 0.45rem;border-radius:var(--r-pill);margin-left:0.4rem;letter-spacing:0.5px;}
 .session-time-custom{font-size:0.7rem;color:var(--warning);font-weight:700;margin-left:1.6rem;margin-top:0.15rem;}
