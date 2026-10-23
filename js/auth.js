@@ -140,9 +140,14 @@ window.renderClientDashboard = function (c) {
       }
     }).catch(() => {});
   }
-  renderClientProgress(c);
-  renderClientProfile(c);
-  renderClientHistory(c);
+  // 🛡️ BUG FIX: each render is isolated in try/catch. Previously ONE failing
+  // renderer (e.g. renderClientProgress throwing on malformed data) aborted
+  // the whole function, so 👤 Profile and 📜 History stayed empty and every
+  // later step — 🔔 bell sync, live polling, tab reset — never ran. That is
+  // exactly the "client portal is broken" pattern users reported.
+  try { renderClientProgress(c); } catch (e) { console.warn('renderClientProgress failed:', e); }
+  try { renderClientProfile(c); } catch (e) { console.warn('renderClientProfile failed:', e); }
+  try { renderClientHistory(c); } catch (e) { console.warn('renderClientHistory failed:', e); }
   // 🧮 Fitness Calculator Hub: restore this client's saved shared inputs.
   if (typeof window.loadFitnessInputsFor === 'function') {
     window.loadFitnessInputsFor(c.id).catch(() => {});

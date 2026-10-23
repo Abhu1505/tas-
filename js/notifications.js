@@ -178,7 +178,14 @@ function paintNotifyButton(btn) {
 window.updateNotifyButton = function () {
   paintNotifyButton($('notifyBtn'));
   paintNotifyButton($('clientNotifyBtn'));
-  if (Notification && Notification.permission === 'granted') APP_STATE.notificationsEnabled = true;
+  // 🛡️ BUG FIX: this bare `Notification` reference threw a ReferenceError on
+  // browsers/environments where the Notifications API doesn't exist at all
+  // (iOS Safari, some in-app webviews). openClientDashboard() calls us AFTER
+  // rendering the portal — so the error aborted the rest of the login flow
+  // (pending banner, weekly reminder, motivation popup, insights never ran)
+  // and every subsequent client-portal action looked "broken". Use the same
+  // safe `'Notification' in window` guard used everywhere else in this file.
+  if (('Notification' in window) && Notification.permission === 'granted') APP_STATE.notificationsEnabled = true;
   // Re-attach the unread badge if one is active after a re-render.
   try { updateAlertBadge(); } catch (e) {}
 };
