@@ -31,22 +31,27 @@
   // file:// has no SW support and would only log errors.
   if (location.protocol !== 'https:' && !/^localhost$|^127\.|\[::1\]/.test(location.hostname)) return;
 
+  /* 🛡️ AUTO-REFRESH BUG FIX -------------------------------------------------
+     Previously every new install of the service worker was told to take
+     over IMMEDIATELY (postMessage('SKIP_WAITING')) and the page then let
+     the new controller claim it. On hosts that serve slightly different
+     byte sizes per request (Netlify/CDN), the SW's network-first shell
+     re-caching made each reload look like a brand-new deployment — so the
+     browser kept activating a new worker and re-controlling/reloading the
+     page forever: the site appeared to auto-refresh repeatedly on open.
+
+     The fix: NEVER skip waiting automatically and NEVER reload from this
+     script. A freshly installed worker simply sits "waiting" until the
+     user closes all app tabs (the browser activates it naturally on the
+     next normal navigation). The app shell is network-first in sw.js, so
+     users always get fresh code without any forced reload. */
   function registerSW() {
     const scope = location.pathname.replace(/\/[^/]*$/, '/'); // folder containing index.html
     const swUrl = (scope.endsWith('/') ? scope : scope + '/') + 'sw.js';
     navigator.serviceWorker.register(swUrl, { scope: scope })
       .then((reg) => {
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
-          if (!nw) return;
-          nw.addEventListener('statechange', () => {
-            // A fresh deploy's SW is ready — hand over control silently.
-            // update-site.js already offers the visible "🔄 Update Site" button.
-            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-              try { nw.postMessage('SKIP_WAITING'); } catch (e) {}
-            }
-          });
-        });
+        // No SKIP_WAITING, no controllerchange reload — silent, safe updates only.
+        void reg;
       })
       .catch(() => { /* offline / unsupported — the app keeps working normally */ });
   }
