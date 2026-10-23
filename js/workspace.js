@@ -13,6 +13,19 @@
   // tools, Calculators = Fitness Calculator Hub, Payments = 💳 Incoming
   // Payments panel — moved out of the floating side bubble into this tab).
   window.showAdminWorkspaceTab = function (tab) {
+    // 🪗 CLICK-TO-EXPAND: every admin workspace tab opens ONLY when it is
+    // clicked. Clicking the tab that is ALREADY open collapses it again —
+    // all workspaces hide and no tab stays highlighted until the next click.
+    if (tab && window.__activeAdminTab === tab) {
+      window.__activeAdminTab = null;
+      ['adminWorkspaceHome', 'adminWorkspaceClients', 'adminWorkspaceCalculators', 'adminWorkspacePayments']
+        .forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
+      document.querySelectorAll('.tab-btn[data-atab2]').forEach(b => b.classList.remove('active'));
+      const payHostCollapse = $('adminPaymentPanelHost');
+      if (payHostCollapse) payHostCollapse.style.display = 'none';
+      return;
+    }
+    window.__activeAdminTab = tab || null;
     const home = $('adminWorkspaceHome');
     const clients = $('adminWorkspaceClients');
     const calcs = $('adminWorkspaceCalculators');
@@ -53,7 +66,55 @@
     window.__adminHomeResetWrapped = true;
     window.openAdminDashboard = function () {
       const out = origOpenAdmin.apply(this, arguments);
-      try { showAdminWorkspaceTab('home'); } catch (e) {}
+      // 🪗 Start COLLAPSED: no workspace is expanded until the trainer
+      // clicks one of the top tabs (click again collapses it — accordion).
+      try {
+        window.__activeAdminTab = null;
+        ['adminWorkspaceHome', 'adminWorkspaceClients', 'adminWorkspaceCalculators', 'adminWorkspacePayments']
+          .forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
+        document.querySelectorAll('.tab-btn[data-atab2]').forEach(b => b.classList.remove('active'));
+        const payHostInit = $('adminPaymentPanelHost');
+        if (payHostInit) payHostInit.style.display = 'none';
+        renderHomeStats();
+      } catch (e) {}
+      return out;
+    };
+  }
+
+  // 🪗 CLIENT PORTAL TABS — same click-to-expand behaviour: clicking the
+  // active tab collapses its content; clicking it again re-expands. The
+  // first visit to each tab still runs its lazy hooks (PDF button etc.).
+  const clientTabHooks = { calculators: () => { try { if (typeof window.injectTasPdfButton === 'function') window.injectTasPdfButton(); } catch (e) {} } };
+  window.__tasBindCollapseTabs = function (sel, prefix) {
+    document.querySelectorAll(sel).forEach(btn => {
+      if (btn.dataset.tasCollapseBound === '1') return;
+      btn.dataset.tasCollapseBound = '1';
+      btn.addEventListener('click', () => {
+        const wasActive = btn.classList.contains('active');
+        const contents = document.querySelectorAll('.tab-content[id^="' + prefix + '-"]');
+        if (wasActive) {
+          // collapse — hide the open panel and de-highlight every tab
+          contents.forEach(t => t.classList.add('hidden'));
+          document.querySelectorAll(sel).forEach(b => b.classList.remove('active'));
+          return;
+        }
+        document.querySelectorAll(sel).forEach(b => b.classList.toggle('active', b === btn));
+        contents.forEach(t => t.classList.toggle('hidden', t.id !== prefix + '-' + btn.dataset[keyOf(prefix)]));
+        const hook = clientTabHooks[btn.dataset[keyOf(prefix)]];
+        if (hook) hook();
+      }, true); // capture phase → always wins over older generic handlers
+    });
+  };
+  function keyOf(prefix) { return prefix; } // data-ctab → dataset.ctab, data-tab → dataset.tab
+
+  const origBindWs = window.bindWorkspaceEvents;
+  if (origBindWs && !window.__collapseTabsWrapped) {
+    window.__collapseTabsWrapped = true;
+    window.bindWorkspaceEvents = function () {
+      const out = origBindWs.apply(this, arguments);
+      try { window.__tasBindCollapseTabs('.tab-btn[data-ctab]', 'ctab'); } catch (e) {}
+      try { window.__tasBindCollapseTabs('.tab-btn[data-tab]', 'tab'); } catch (e) {}
+      try { window.__tasBindCollapseTabs('.tab-btn[data-ctabform]', 'ctabform'); } catch (e) {}
       return out;
     };
   }
@@ -132,10 +193,20 @@
   };
 
   window.bindWorkspaceEvents = function () {
-    // 🏠 Home / 📋 Clients workspace switch
+    // 🏠 Home / 📋 Clients workspace switch — click-to-expand, click the
+    // same tab again to collapse (handled inside showAdminWorkspaceTab).
     document.querySelectorAll('.tab-btn[data-atab2]').forEach(btn => {
+      if (btn.dataset.atab2Bound === '1') return;
+      btn.dataset.atab2Bound = '1';
       btn.addEventListener('click', () => {
+        const wasActive = btn.classList.contains('active');
         window.showAdminWorkspaceTab(btn.dataset.atab2);
+        // Re-opening a collapsed tab: make sure its active highlight is on
+        // (collapse path removed it; expand path sets it again anyway).
+        if (!wasActive && window.__activeAdminTab === btn.dataset.atab2) {
+          document.querySelectorAll('.tab-btn[data-atab2]').forEach(b =>
+            b.classList.toggle('active', b === btn));
+        }
         if (btn.dataset.atab2 === 'home') renderHomeStats();
       });
     });
