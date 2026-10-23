@@ -122,10 +122,11 @@ window.renderClientDashboard = function (c) {
   if (!c) return;
   const nowD = new Date(); const y = nowD.getFullYear(), m = nowD.getMonth();
   const sessions = getSessions(c.id, y, m);
-  const rate = getRate(c.id);
   $('clientDashMonth').textContent = `${getMonthName(m)} ${y}`;
   $('clientDashDone').textContent = sessions.length;
-  $('clientDashAmount').textContent = `${APP_CONFIG.CURRENCY} ${sessions.length * rate}`;
+  // 💵 Amount due tile is rendered by js/payments.js (renderPaymentCard):
+  // it shows sessions × rate PLUS any unpaid months carried over, and only
+  // drops to zero once a payment is completed.
 
   renderClientUpcoming(c);
   renderClientPlan(c);

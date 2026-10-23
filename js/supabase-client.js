@@ -159,6 +159,12 @@ window.loadAllData = async function () {
     }
   } catch (e) { APP_STATE.workoutEditRequests = []; }
 
+  // 💳 Load paid invoices (client_payments) so the portal knows which months
+  //     are settled — unpaid months carry over into the amount due.
+  try { if (typeof window.loadClientPayments === 'function') await window.loadClientPayments(); } catch (e) { console.warn('payments load skipped:', e); }
+  // Keep the trainer's revenue tile honest: only count UNPAID session value.
+  try { if (typeof renderHomeStats === 'function') renderHomeStats(); } catch (e) {}
+
   updateApprovalsBadge();
   // Keep the client portal's "⏳ Pending approval" banner honest: it now
   // re-evaluates from getTruePendingCounts() after every data load, so a
@@ -620,6 +626,28 @@ const PROVISION_SQL = {
     'create policy cph_all on public.client_password_hashes for all using (true) with check (true);'
   ].join('\n'),
 
+  // ---- 💳 payments: per-client monthly invoices paid from the portal ----
+  client_payments: [
+    'create table if not exists public.client_payments (',
+    '  id uuid primary key default gen_random_uuid(),',
+    '  client_id text not null,',
+    '  invoice_key text not null,',
+    '  amount_due numeric not null default 0,',
+    "  currency text not null default 'AED',",
+    "  method text not null default 'apple_pay',",
+    '  reference text,',
+    "  status text not null default 'paid',",
+    '  created_at timestamptz not null default now());',
+    'create index if not exists cp_client_idx on public.client_payments (client_id, invoice_key);',
+    'alter table public.client_payments enable row level security;',
+    'drop policy if exists cp_select on public.client_payments;',
+    'create policy cp_select on public.client_payments for select using (true);',
+    'drop policy if exists cp_insert on public.client_payments;',
+    'create policy cp_insert on public.client_payments for insert with check (true);',
+    'drop policy if exists cp_update on public.client_payments;',
+    'create policy cp_update on public.client_payments for update using (true) with check (true);'
+  ].join('\n'),
+
   // ---- v3 hardening: hashed admin password column on the existing config row ----
   admin_config: [
     'alter table public.admin_config add column if not exists password_hash text;'
@@ -683,6 +711,7 @@ window.ensureWorkoutEditRequestsTable = () => window.ensureTableExists('workout_
 // Which SQL file creates the given table (used in setup instructions).
 window.sqlFileForTable = function (table) {
   if (table === 'progress_reports') return 'sql/progress_reports.sql';
+  if (table === 'client_payments') return 'sql/client_payments.sql';
   return 'sql/workout_edit_requests.sql';
 };
 

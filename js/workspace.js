@@ -94,10 +94,27 @@
         + (APP_STATE.workoutEditRequests || []).filter(r => r.status === 'pending').length);
     set('hsPendingApprovals', pend);
     let monthSessions = 0, revenue = 0;
+    // 💳 Revenue counts only UNPAID session value: once a client settles an
+    //    invoice via the portal (js/payments.js), those sessions no longer
+    //    count as outstanding revenue.
+    const isPaidMonth = (cid, yy, mm) => {
+      const key = `${yy}-${String(mm + 1).padStart(2, '0')}`;
+      const rows = APP_STATE.clientPayments || [];
+      const covers = (r) => String(r.invoice_key || '').split('+').indexOf(key) !== -1;
+      // Only 'paid' rows count as settled — 'pending' bank-transfer
+      // declarations are still outstanding until the trainer approves them.
+      const isLocalPaid = () => {
+        try {
+          const loc = JSON.parse(localStorage.getItem('tas_client_payments_v1') || '[]');
+          return loc.some(r => String(r.client_id) === String(cid) && covers(r) && String(r.status || 'paid') === 'paid');
+        } catch (e) { return false; }
+      };
+      return rows.some(r => String(r.client_id ?? '') === String(cid) && covers(r) && String(r.status || 'paid') === 'paid') || isLocalPaid();
+    };
     active.forEach(c => {
       const n = (typeof getSessions === 'function' ? getSessions(c.id, y, m).length : 0);
       monthSessions += n;
-      revenue += n * (typeof getRate === 'function' ? getRate(c.id) : 0);
+      if (!isPaidMonth(c.id, y, m)) revenue += n * (typeof getRate === 'function' ? getRate(c.id) : 0);
     });
     set('hsMonthSessions', monthSessions);
     set('hsMonthRevenue', revenue.toLocaleString());
