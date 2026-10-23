@@ -246,6 +246,13 @@ window.checkClientUpdatesAndNotify = function () {
   APP_STATE.clientSnapshot = snap;
   if (!prev) return; // first sync after login — nothing to compare yet
 
+  // 🛡️ BLINK FIX: remember whether anything actually changed. The polling
+  // loop uses this to skip the full dashboard re-render when the cloud data
+  // is identical — re-rendering unchanged data was replaying the stat-tile
+  // animations every minute (the "blinking" client portal tiles).
+  snap.changed = (prev.dt !== snap.dt) || (prev.ex !== snap.ex) ||
+                 (prev.sess !== snap.sess) || (prev.prog !== snap.prog);
+
   if (prev.dt !== snap.dt) {
     // Find which day's time actually changed for a meaningful message.
     const before = Object.fromEntries((prev._dtList || []).map(d => [d.day_date, d.class_time]));
@@ -310,7 +317,13 @@ window.startNotificationPolling = function () {
           .order('entry_date', { ascending: false });
         APP_STATE.progressEntries[cid] = pe || [];
         checkClientUpdatesAndNotify();
-        renderClientDashboard(APP_STATE.loggedInClient);
+        // 🛡️ BLINK FIX: only re-render the dashboard when something actually
+        // changed. Previously every 60s poll (and every realtime poke) forced
+        // a full re-render with identical data, which replayed the stat-tile
+        // roll-up/pop animations — the tiles appeared to blink for no reason.
+        if (!APP_STATE.clientSnapshot || APP_STATE.clientSnapshot.changed) {
+          renderClientDashboard(APP_STATE.loggedInClient);
+        }
       }
     } catch (e) { /* offline — retry next tick */ }
   };

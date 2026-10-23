@@ -64,10 +64,24 @@
 
   var running = {};   // id -> active animation frame handle
 
+  // 🛡️ BLINK FIX: while a roll-up is playing we write the intermediate
+  // numbers ourselves. Those writes used to be picked up again by the
+  // MutationObserver as "new" app renders, which restarted the tween and
+  // rewound the number — a visible flicker on every poll/realtime sync.
+  // Anything flagged as "silent" (our own animation frames, or re-writes
+  // of an unchanged value) is ignored by the observer below.
+  function silentSet(el, text) {
+    el.__tasSilent = true;
+    el.textContent = text;
+    // Reset asynchronously so the MutationObserver callback (queued as a
+    // microtask) still sees the flag when it runs for this mutation.
+    setTimeout(function () { el.__tasSilent = false; }, 0);
+  }
+
   function tween(el, id, fromVal, toText) {
     var toVal = parseDisplayed(toText);
     if (toVal === null || fromVal === null || reduced || fromVal === toVal) {
-      el.textContent = toText;           // non-numeric or motion off: plain swap
+      silentSet(el, toText);             // non-numeric or motion off: plain swap
       return;
     }
     var pre = prefixOf(toText), suf = suffixOf(toText);
@@ -80,11 +94,11 @@
     function step(now) {
       var p = Math.min(1, (now - t0) / dur);
       var eased = 1 - Math.pow(1 - p, 3);            // ease-out cubic, Apple-ish
-      el.textContent = fmt(fromVal + (toVal - fromVal) * eased, decimals, useCommas, pre, suf);
+      silentSet(el, fmt(fromVal + (toVal - fromVal) * eased, decimals, useCommas, pre, suf));
       if (p < 1) { running[id] = requestAnimationFrame(step); }
       else {
         running[id] = 0;
-        el.textContent = toText;                      // land exactly on final text
+        silentSet(el, toText);                        // land exactly on final text
         setTimeout(function () { el.classList.remove('counting'); }, 500);
       }
     }
@@ -98,23 +112,33 @@
       var el = document.getElementById(id);
       if (!el || el.__tasCounted) return;
       el.__tasCounted = true;
+      el.__tasLast = el.textContent;   // remember what is actually on screen
       var mo = new MutationObserver(function (list) {
+        // 🛡️ BLINK FIX: our own animation writes are flagged — skip them.
+        if (el.__tasSilent) return;
         for (var i = 0; i < list.length; i++) {
           var newText = el.textContent;
-          var oldText = list[i].oldValue;
-          if (newText === oldText) continue;
+          var oldText = el.__tasLast;
+          if (newText === oldText) continue;         // identical re-render → no roll
           var fromVal = parseDisplayed(oldText);
-          if (isVisible(el)) {
-            // restore the old number for one frame, then roll to the new one
-            el.textContent = oldText;
-            requestAnimationFrame(function () { tween(el, id, fromVal, newText); });
+          var toVal = parseDisplayed(newText);
+          el.__tasLast = newText;
+          if (isVisible(el) && toVal !== null && fromVal !== null && fromVal !== toVal) {
+            // Value genuinely changed while visible: roll from the number
+            // that was on screen before to the new one — WITHOUT rewinding
+            // the DOM first (the old "restore previous text" trick caused a
+            // one-frame flash back to the stale value on every poll tick).
+            tween(el, id, fromVal, newText);
+          } else if (running[id]) {
+            cancelAnimationFrame(running[id]); running[id] = 0;
+            silentSet(el, newText);                  // off-screen or same value: snap
           }
           // not visible → leave the final value in place; it will simply
           // be there when the user scrolls to it (no jarring hidden roll)
           return; // one mutation record is enough per batch
         }
       });
-      try { mo.observe(el, { childList: true, characterData: true, subtree: true, attributeOldValue: false, characterDataOldValue: true }); } catch (e) {}
+      try { mo.observe(el, { childList: true, characterData: true, subtree: true }); } catch (e) {}
     });
   }
 
@@ -138,11 +162,18 @@
       var toText = el.textContent;
       var toVal = parseDisplayed(toText);
       if (toVal === null || toVal === 0) return;
+      // 🛡️ BLINK FIX: don't re-roll a number that has already rolled on
+      // this screen — only animate when the value actually changed since
+      // the last intro (prevents repeated zero-rewinds on tab clicks).
+      if (el.__tasIntro === toText) return;
+      el.__tasIntro = toText;
+      el.__tasLast = String(toVal);   // observer sees "from" as the rolled start
       var pre = prefixOf(toText), suf = suffixOf(toText);
       var decimals = (String(toText).match(/\.(\d+)/) || ['', ''])[1].length;
       var useCommas = /,/.test(toText) || toVal >= 1000;
-      el.textContent = fmt(0, decimals, useCommas, pre, suf);
+      silentSet(el, fmt(0, decimals, useCommas, pre, suf));
       tween(el, id, 0, toText);
+      el.__tasLast = toText;
     });
   }
 
