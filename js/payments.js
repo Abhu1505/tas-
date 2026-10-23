@@ -279,6 +279,110 @@
     return !!(b.bankEnabled && (b.bankIban || b.bankUpi || b.bankName));
   }
 
+  // Shared escaper for everything this file injects as HTML.
+  const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+  // Clipboard helper with a fallback for older / non-secure contexts so a
+  // copy tap NEVER silently fails.
+  function copyToClipboard(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(txt)
+        .then(() => true)
+        .catch(() => legacyCopy(txt));
+    }
+    return Promise.resolve(legacyCopy(txt));
+  }
+  function legacyCopy(txt) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, txt.length);
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+
+  // ============================================================
+  // 🏦 TRAINER BANK DETAILS — read-only in the client portal
+  // ------------------------------------------------------------
+  // The values are whatever the ADMIN last saved (admin_config row wins
+  // over js/config.js defaults). Clients see them in the "Pay For Your
+  // Sessions" card as a small read-only summary; the FULL details pop up
+  // only when they tap a payment button. Every value is strictly
+  // NON-editable (plain text spans — never inputs/contenteditable) and
+  // each one can be copied INDIVIDUALLY with its own 📋 button so it can
+  // be pasted straight into the client's banking app.
+  // ============================================================
+  function detailRowsFromConfig(cfg) {
+    const rows = [];
+    if (cfg.bankName) rows.push({ label: '🏦 Bank name', value: cfg.bankName });
+    if (cfg.bankAccountName) rows.push({ label: '👤 Account holder', value: cfg.bankAccountName });
+    if (cfg.bankIban) rows.push({ label: '🔢 IBAN', value: cfg.bankIban });
+    if (cfg.bankSwift) rows.push({ label: '🌐 SWIFT/BIC', value: cfg.bankSwift });
+    if (cfg.bankUpi) rows.push({ label: '📱 UPI ID', value: cfg.bankUpi });
+    if (cfg.paypalLink) rows.push({ label: '🅿️ PayPal.me', value: cfg.paypalLink });
+    return rows;
+  }
+
+  // Mask a value for the pre-payment summary (keep it recognisable only).
+  function maskValue(v) {
+    const s = String(v);
+    if (s.length <= 4) return '••••';
+    return s.slice(0, 2) + '••••••' + s.slice(-2);
+  }
+
+  // One read-only detail line: label · value (masked or full) · 📋 copy.
+  // The copy button ALWAYS copies the real value even while masked.
+  function detailLineHTML(label, value, masked) {
+    const shown = masked ? maskValue(value) : value;
+    return `<div class="bank-detail-line">` +
+      `<span class="bd-label">${escHtml(label)}</span>` +
+      `<strong class="bd-value" title="${escHtml(value)}">${escHtml(shown)}</strong>` +
+      `<button type="button" class="bd-copy" data-copy-val="${escHtml(value)}" aria-label="Copy ${escHtml(label)}">📋</button>` +
+      `</div>`;
+  }
+
+  // Delegated copy handler for any [data-copy-val] element inside `root`.
+  function bindCopyButtons(root) {
+    if (!root || root.dataset.copyBound === 'yes') return;
+    root.dataset.copyBound = 'yes';
+    root.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-copy-val]');
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const val = btn.getAttribute('data-copy-val');
+      copyToClipboard(val).then((ok) => {
+        toast(ok ? '📋 Copied — paste it straight into your banking app.'
+                 : '⚠️ Could not copy automatically — long-press the value to copy.',
+              ok ? 'success' : 'info');
+      });
+    });
+  }
+
+  // Read-only trainer-details block inside the client payment card.
+  function coachDetailsBlockHTML(cfg, info) {
+    const rows = detailRowsFromConfig(cfg);
+    let head = `<div class="payment-coach-title">🏦 Coach's transfer details <span class="pc-chip">updated by your coach</span></div>`;
+    if (!rows.length) {
+      return `<div class="payment-coach-details hidden-details">${head}<div class="pc-empty">Your coach hasn't saved transfer details yet. Tap “🏦 Bank Transfer” below and follow the on-screen instructions.</div></div>`;
+    }
+    const masked = info.allClear; // no payment to make → stay hidden/blurred
+    return `<div class="payment-coach-details${masked ? ' hidden-details' : ''}">` +
+      head +
+      `<div class="pc-hint">${masked
+        ? '🔒 These are the details your coach wants you to transfer to. Tap any payment button to reveal them.'
+        : 'Read-only — exactly as updated by your coach. Tap 📋 beside any line to copy that single detail for pasting into your banking app.'}</div>` +
+      rows.map(r => detailLineHTML(r.label, r.value, masked)).join('') +
+      `<div class="pc-lock-note">🔒 Values cannot be edited here — they come directly from your coach's account settings.</div>` +
+      `</div>`;
+  }
+
   // ============================================================
   // 🏦 DIRECT BANK TRANSFER — money goes straight to the trainer's account
   // ============================================================
@@ -290,18 +394,14 @@
   window.tasShowBankTransferModal = function (opts) {
     const cfg = window.getPaymentProviderConfig();
     const amount = Number(opts.amount) || 0;
-    const rows = [];
-    if (cfg.bankName) rows.push(['🏦 Bank', cfg.bankName]);
-    if (cfg.bankAccountName) rows.push(['👤 Account name', cfg.bankAccountName]);
-    if (cfg.bankIban) rows.push(['🔢 IBAN', cfg.bankIban]);
-    if (cfg.bankSwift) rows.push(['🌐 SWIFT/BIC', cfg.bankSwift]);
-    if (cfg.bankUpi) rows.push(['📱 UPI ID', cfg.bankUpi]);
-    // If the coach hasn't saved bank details yet, still give the client a
-    // usable sheet: pay from their own banking app to the coach and declare.
-    if (!rows.length) {
-      rows.push(['ℹ️ How to pay', "Open your banking app and send the exact amount below directly to your coach's account, then tap \"I have transferred\" here so they can verify and clear your balance."]);
-    }
-    const esc = (s) => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    // Full trainer details pop up ONLY now — when the client is actually
+    // making a payment. Each line carries its own 📋 copy button so the
+    // value can be copied individually and pasted into their banking app.
+    const rows = detailRowsFromConfig(cfg);
+    const detailLines = rows.length
+      ? rows.map(r => detailLineHTML(r.label, r.value, false)).join('')
+      : `<div class="bank-detail-line"><span class="bd-label">ℹ️ How to pay</span><strong class="bd-value">Open your banking app and send the exact amount below directly to your coach's account, then tap "I have transferred" here so they can verify and clear your balance.</strong></div>`;
+    const esc = escHtml;
 
     return new Promise((resolve) => {
       const wrap = document.createElement('div');
@@ -309,12 +409,12 @@
       wrap.innerHTML = `<div class="modal-card tas-card-modal-card">
         <div class="modal-title">🏦 Direct bank transfer</div>
         <p class="modal-subhead">Transfer <strong>${esc(fmtMoney(amount))}</strong> straight into the trainer's account using the details below, then tap "I have transferred". Your coach verifies the payment and your balance clears right after.</p>
-        <div class="bank-details" style="border:1px solid var(--line,#ddd);border-radius:12px;padding:.6rem .8rem;margin:.4rem 0;display:flex;flex-direction:column;gap:.35rem;">
-          ${rows.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;"><span style="opacity:.75;">${esc(k)}</span><strong style="user-select:all;text-align:right;word-break:break-all;" data-bank-val="${esc(v)}">${esc(v)}</strong></div>`).join('')}
-          <div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;"><span style="opacity:.75;">💵 Amount</span><strong data-bank-val="${amount.toFixed(2)}">${fmtMoney(amount)}</strong></div>
+        <div class="bank-details" id="tasBankDetails">
+          ${detailLines}
+          <div class="bank-detail-line"><span class="bd-label">💵 Amount</span><strong class="bd-value">${fmtMoney(amount)}</strong><button type="button" class="bd-copy" data-copy-val="${esc(amount.toFixed(2))}" aria-label="Copy amount">📋</button></div>
         </div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.2rem;">
-          <button class="btn-secondary" id="tasBankCopy" type="button" style="width:auto;">📋 Copy details</button>
+          <button class="btn-secondary" id="tasBankCopy" type="button" style="width:auto;">📋 Copy all details</button>
           <a class="btn-secondary" id="tasBankWa" type="button" style="width:auto;text-decoration:none;display:inline-flex;align-items:center;">📲 Send receipt on WhatsApp</a>
         </div>
         <label style="display:flex;gap:.5rem;align-items:flex-start;margin-top:.8rem;font-size:.92rem;">
@@ -328,6 +428,8 @@
         <p style="font-size:.8rem;opacity:.7;margin:.4rem 0 0;">⚠️ Until your coach confirms the money arrived, the amount stays due and carries over to next month automatically.</p>
       </div>`;
       document.body.appendChild(wrap);
+      // 📋 per-line copy buttons (each detail copied individually).
+      bindCopyButtons(wrap);
 
       const waText = `Hi Coach, I have transferred ${fmtMoney(amount)} (${opts.label || ''}) to your account.`;
       const waNum = (window.APP_CONFIG && APP_CONFIG.TRAINER_WHATSAPP) || '';
@@ -336,9 +438,10 @@
       if (!waNum) waLink.style.display = 'none';
 
       $id('tasBankCopy').onclick = () => {
-        const txt = rows.map(([k, v]) => `${k.replace(/^\S+\s/, '')}: ${v}`).join('\n') + `\nAmount: ${amount.toFixed(2)} ${CUR()}`;
-        try { navigator.clipboard.writeText(txt); toast('📋 Bank details copied.', 'success'); }
-        catch (e) { toast('Long-press the values to copy them.', 'info'); }
+        const txt = rows.map(r => `${r.label.replace(/^\S+\s/, '')}: ${r.value}`).join('\n') + `\nAmount: ${amount.toFixed(2)} ${CUR()}`;
+        copyToClipboard(txt).then((ok) => {
+          toast(ok ? '📋 All bank details copied.' : '⚠️ Could not copy automatically — use the 📋 button on each line.', ok ? 'success' : 'info');
+        });
       };
       const done = $id('tasBankDone');
       done.onchange = () => { $id('tasBankDeclare').disabled = !done.checked; };
@@ -456,6 +559,7 @@
         Any month left unpaid automatically carries over and is added to next month's total.</div>
       <div class="payment-breakdown" id="paymentBreakdown"></div>
       <div class="payment-total-row" id="paymentTotalRow"></div>
+      <div id="coachDetailsSlot"></div>
       <div class="payment-methods" id="paymentMethods" role="group" aria-label="Payment methods"></div>
       <div class="payment-history-wrap">
         <div class="payment-history-title">🧾 Payment history</div>
@@ -463,7 +567,21 @@
       </div>`;
     anchor.parentNode.insertBefore(div, anchor.nextSibling);
     bindPaymentEvents(div);
+    bindCopyButtons(div); // 📋 buttons inside the read-only coach-details block
     return div;
+  }
+
+  // Reveal the trainer's FULL details once the client starts paying.
+  // (The card summary stays blurred until a payment attempt — "only when
+  // the client tries to make a payment should the full details pop up".)
+  function revealCoachDetails() {
+    const slot = $id('coachDetailsSlot');
+    if (!slot || !slot.querySelector('.payment-coach-details')) return;
+    slot.classList.add('revealed');
+    const cfg = window.getPaymentProviderConfig();
+    slot.innerHTML = coachDetailsBlockHTML(cfg, { allClear: false });
+    bindCopyButtons(slot);
+    toast("👀 Trainer's transfer details revealed — tap 📋 on any line to copy it individually.", 'info', 5000);
   }
 
   function methodButtonHTML() {
@@ -520,6 +638,9 @@
         if (!btn || btn.disabled) return;
         const c = APP_STATE && APP_STATE.loggedInClient;
         if (!c) { toast('🔐 Please sign in first.', 'info'); return; }
+        // Client is trying to pay → the trainer's full details are revealed
+        // (they stay blurred/masked in the card until this moment).
+        revealCoachDetails();
         const info = window.getBalanceInfo(c.id);
         const method = btn.dataset.payMethod;
         if (method === 'offline') {
@@ -593,6 +714,17 @@
     }
 
     if (methods) {
+      const slot = $id('coachDetailsSlot');
+      if (slot) {
+        // Read-only coach details, shown right above the payment buttons.
+        // Values are exactly what the admin last updated; they pop to full
+        // view only once the client taps a payment button (see
+        // revealCoachDetails). Until then each line stays blurred/masked.
+        const alreadyRevealed = slot.classList.contains('revealed');
+        slot.innerHTML = coachDetailsBlockHTML(window.getPaymentProviderConfig(),
+          { allClear: info.allClear && !alreadyRevealed });
+        bindCopyButtons(slot);
+      }
       if (methods.dataset.bound !== 'yes') { methods.innerHTML = methodButtonHTML(); methods.dataset.bound = 'yes'; }
       const offBtn = methods.querySelector('.pay-offline');
       if (offBtn) {
