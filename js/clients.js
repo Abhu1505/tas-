@@ -52,8 +52,30 @@ window.renderClientList = function () {
     item.addEventListener('click', () => selectClient(item.dataset.clientId)));
 };
 
+// Collapse the open client detail panel — used when the SAME client row
+// is clicked again (accordion behaviour: click = expand, click again =
+// collapse) and by the ✕ button in the panel header.
+window.collapseClientDetail = function () {
+  APP_STATE.selectedClientId = null;
+  APP_STATE.selectedDay = null;
+  const d = $('clientDetailPanel');
+  if (d) d.classList.add('hidden');
+  const msg = $('noClientSelectedMsg');
+  if (msg) msg.classList.remove('hidden');
+  document.querySelectorAll('.client-item').forEach(el => el.classList.remove('active-client'));
+};
+
 window.selectClient = function (clientId) {
   const c = getClient(clientId); if (!c) return;
+  // 🪗 ACCORDION: clicking the already-open client collapses their details
+  // instead of re-rendering everything. The active highlight lives on the
+  // row itself, so it survives list re-renders while the client stays
+  // "selected" internally (their panels still refresh after edits).
+  const detailEl = $('clientDetailPanel');
+  if (sameId(APP_STATE.selectedClientId, c.id) && detailEl && !detailEl.classList.contains('hidden')) {
+    window.collapseClientDetail();
+    return;
+  }
   // Store the canonical id from the record so later strict comparisons
   // (e.g. selectedClientId === a.client_id) keep working.
   APP_STATE.selectedClientId = c.id;
