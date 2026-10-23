@@ -5,12 +5,13 @@
 //   • Shows the amount due for the current month's sessions inside
 //     the client portal ("💵 Amount due" tile + a dedicated
 //     "💳 Pay For Your Sessions" card with a monthly statement).
-//   • Adds real payment buttons:  Pay (Apple Pay) via the Apple Pay
-//     JS API (passkit.js.apple.com) when the device/browser supports
-//     it, plus Google Pay and generic Card (Visa/Mastercard/Amex)
-//     buttons through Stripe's Payment Request API. When no payment
-//     provider is configured, an "Offline / cash" button records the
-//     payment locally so the flow still works end-to-end.
+//   • Payment methods are DIRECT-TO-COACH ONLY — no third-party gateway,
+//     no API keys anywhere:
+//       🏦 Bank Transfer → money lands straight in the trainer's bank account
+//       🅿️ PayPal.me     → money lands straight in the trainer's PayPal
+//       ✔️ Record payment (cash / plain transfer) fallback if neither is set up.
+//     Declared transfers are stored as 'pending' and only clear the balance
+//     once the trainer approves them from the admin "💳 Incoming Payments" panel.
 //   • The amount due is ONLY cleared once a payment completes
 //     successfully (paid invoice rows in Supabase `client_payments`,
 //     mirrored to localStorage while offline). Unpaid months are not
@@ -20,20 +21,14 @@
 // BACKEND SETUP (one-time, safe & idempotent):
 //   Run sql/client_payments.sql once in Supabase → SQL Editor. It
 //   creates the `client_payments` table (+ RLS policies) and adds the
-//   optional `payment_provider` / `stripe_publishable_key` columns to
-//   `admin_config`. Until that migration exists everything degrades
-//   gracefully to localStorage, so the portal never breaks.
+//   bank/PayPal detail columns to `admin_config`. Until that migration
+//   exists everything degrades gracefully to localStorage, so the
+//   portal never breaks.
 //
-// PROVIDER CONFIG (optional — enables Apple Pay / Google Pay / Card):
-//   In js/config.js set:
-//     PAYMENT_PROVIDER: 'stripe',                  // or 'apple_pay_direct'
-//     STRIPE_PUBLISHABLE_KEY: 'pk_live_…',         // Stripe only
-//     APPLE_PAY_MERCHANT_ID: 'merchant.com.…'      // Apple Pay Direct only
-//   The same values can live in the admin_config row (cloud wins), so
-//   the trainer can change them without redeploying.
-//   NOTE: Apple Pay requires the site to be served over HTTPS from a
-//   domain registered with the payment processor / Apple merchant
-//   account. On unsupported browsers the Apple Pay button hides itself.
+// YOUR DETAILS (no keys needed):
+//   In js/config.js set BANK_NAME / BANK_ACCOUNT_NAME / BANK_IBAN /
+//   BANK_SWIFT / BANK_UPI_ID and/or PAYPAL_ME_LINK — or edit them live
+//   from the admin "💳 Incoming Payments" panel (cloud values win).
 // ============================================================
 (function () {
   'use strict';
@@ -90,12 +85,31 @@
   // immediately, even before the next full data reload. A paid invoice row
   // covers EVERY month key it lists (combined invoices like
   // "2026-08+2026-09" clear both months at once).
+  // NOTE: only rows with status 'paid' clear the balance. Bank-transfer
+  // declarations are stored as 'pending' and do NOT clear the amount due —
+  // it keeps carrying over until the trainer verifies the money landed in
+  // their account and approves the payment (which flips the row to 'paid').
   function isInvoicePaid(clientId, mk) {
     const covers = (p) => String(p.invoice_key || '').split('+').indexOf(mk) !== -1;
     const remote = (window.APP_STATE && APP_STATE.clientPayments) || [];
     if (remote.some(p => sameId(p.client_id, clientId) && covers(p) &&
       String(p.status || 'paid') === 'paid')) return true;
-    return readLocalPayments().some(p => String(p.client_id) === String(clientId) && covers(p));
+    return readLocalPayments().some(p => String(p.client_id) === String(clientId) &&
+      covers(p) && String(p.status || 'paid') === 'paid');
+  }
+
+  // Pending bank-transfer declarations for a client (for the "awaiting
+  // verification" note in the portal).
+  function getPendingTransfers(clientId) {
+    const remote = ((window.APP_STATE && window.APP_STATE.clientPayments) || [])
+      .filter(p => sameId(p.client_id, clientId) && String(p.status) === 'pending');
+    const local = readLocalPayments()
+      .filter(p => String(p.client_id) === String(clientId) && String(p.status) === 'pending');
+    const seen = {};
+    return remote.concat(local).filter(p => {
+      const k = p.invoice_key + '|' + (p.created_at || '');
+      if (seen[k]) return false; seen[k] = 1; return true;
+    });
   }
 
   // ============================================================
@@ -183,32 +197,38 @@
   // Merge a freshly-paid invoice into the in-memory state right away so the
   // "Amount due" tile drops to zero instantly (no wait for a reload).
   function recordPaidLocally(clientId, mk, method, amount, ref) {
+    return recordRowLocally(clientId, mk, method, amount, ref, 'paid');
+  }
+  function recordRowLocally(clientId, mk, method, amount, ref, status) {
     const rec = {
       client_id: String(clientId), invoice_key: mk, amount_due: amount,
-      currency: CUR(), method, reference: ref || '', status: 'paid',
+      currency: CUR(), method, reference: ref || '', status,
       created_at: new Date().toISOString()
     };
     addLocalPayment(rec);
     if (APP_STATE.clientPayments) {
-      if (!APP_STATE.clientPayments.some(p => sameId(p.client_id, clientId) && p.invoice_key === mk)) {
+      if (!APP_STATE.clientPayments.some(p => sameId(p.client_id, clientId) && p.invoice_key === mk && p.status === status)) {
         APP_STATE.clientPayments.unshift(rec);
       }
     }
+    return rec;
   }
 
   // Persist a completed payment. Cloud first; on failure fall back to the
   // local mirror and queue for retry so the balance still clears.
-  function persistPayment(clientId, mk, method, amount, ref) {
-    recordPaidLocally(clientId, mk, method, amount, ref);
+  function persistPayment(clientId, mk, method, amount, ref, status) {
+    status = status || 'paid';
+    const rec = recordRowLocally(clientId, mk, method, amount, ref, status);
     const sb = APP_STATE.supabaseClient;
     if (!sb) return Promise.resolve({ ok: true, cloud: false });
     return sb.from('client_payments').insert({
       client_id: String(clientId), invoice_key: mk, amount_due: amount,
-      currency: CUR(), method, reference: ref || '', status: 'paid'
+      currency: CUR(), method, reference: ref || '', status
     }).then(({ error }) => {
       if (error) {
         // Queue for retry on next load (e.g. table migration not run yet).
-        APP_STATE._pendingPaymentRetry = { client_id: String(clientId), invoice_key: mk, amount_due: amount, currency: CUR(), method, reference: ref || '', status: 'paid', pending_retry: true };
+        APP_STATE._pendingPaymentRetry = APP_STATE._pendingPaymentRetry || [];
+        APP_STATE._pendingPaymentRetry.push(Object.assign({}, rec, { id: undefined, pending_retry: true }));
         return { ok: true, cloud: false, error };
       }
       APP_STATE.clientPaymentsCloudOk = true;
@@ -218,16 +238,18 @@
 
   // Retry queued payments once the cloud table becomes available.
   async function flushPendingPaymentRetry() {
-    const pend = APP_STATE && APP_STATE._pendingPaymentRetry;
+    const pend = (APP_STATE && APP_STATE._pendingPaymentRetry) || [];
     const sb = APP_STATE && APP_STATE.supabaseClient;
-    if (!pend || !sb) return;
-    try {
-      const { error } = await sb.from('client_payments').insert(pend);
-      if (!error) {
-        APP_STATE._pendingPaymentRetry = null;
-        console.info('💳 Queued payment synced to cloud.');
-      }
-    } catch (e) { /* keep queued for next time */ }
+    if (!pend.length || !sb) return;
+    const remaining = [];
+    for (const row of pend) {
+      try {
+        const { error } = await sb.from('client_payments').insert(row);
+        if (error) remaining.push(row);
+      } catch (e) { remaining.push(row); }
+    }
+    APP_STATE._pendingPaymentRetry = remaining;
+    if (pend.length && !remaining.length) console.info('💳 Queued payments synced to cloud.');
   }
 
   // ============================================================
@@ -237,172 +259,90 @@
     const cfg = (window.APP_CONFIG && APP_CONFIG) || {};
     const ac = (APP_STATE && APP_STATE.adminConfig) || {};
     return {
-      provider: String(ac.payment_provider || cfg.PAYMENT_PROVIDER || '').trim().toLowerCase(),
-      stripePk: String(ac.stripe_publishable_key || cfg.STRIPE_PUBLISHABLE_KEY || '').trim(),
-      appleMerchantId: String(ac.apple_pay_merchant_id || cfg.APPLE_PAY_MERCHANT_ID || '').trim()
+      // 🏦 Direct-to-trainer bank transfer — money goes straight into the
+      // trainer's own account. No gateway, no keys. Cloud (admin_config)
+      // values override js/config.js so the trainer can edit them live.
+      bankEnabled: (ac.bank_transfer_enabled != null ? ac.bank_transfer_enabled !== false && ac.bank_transfer_enabled !== 'false' : cfg.BANK_TRANSFER_ENABLED !== false),
+      bankName: String(ac.bank_name || cfg.BANK_NAME || '').trim(),
+      bankAccountName: String(ac.bank_account_name || cfg.BANK_ACCOUNT_NAME || '').trim(),
+      bankIban: String(ac.bank_iban || cfg.BANK_IBAN || '').trim(),
+      bankSwift: String(ac.bank_swift || cfg.BANK_SWIFT || '').trim(),
+      bankUpi: String(ac.bank_upi_id || cfg.BANK_UPI_ID || '').trim(),
+      paypalLink: String(ac.paypal_me_link || cfg.PAYPAL_ME_LINK || '').trim()
     };
   };
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-      const s = document.createElement('script');
-      s.src = src; s.async = true;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Failed to load ' + src));
-      document.head.appendChild(s);
+  function hasBankDetails(b) {
+    return !!(b.bankEnabled && (b.bankIban || b.bankUpi || b.bankName));
+  }
+
+  // ============================================================
+  // 🏦 DIRECT BANK TRANSFER — money goes straight to the trainer's account
+  // ============================================================
+  // Shows the trainer's bank details + the exact amount due, with copy &
+  // WhatsApp buttons. When the client ticks "I have transferred", a
+  // 'pending' row is stored (cloud + local). The amount due does NOT clear
+  // yet — it stays due (and keeps carrying over) until the trainer checks
+  // their bank and approves the payment from the admin Payments panel.
+  window.tasShowBankTransferModal = function (opts) {
+    const cfg = window.getPaymentProviderConfig();
+    const amount = Number(opts.amount) || 0;
+    const rows = [];
+    if (cfg.bankName) rows.push(['🏦 Bank', cfg.bankName]);
+    if (cfg.bankAccountName) rows.push(['👤 Account name', cfg.bankAccountName]);
+    if (cfg.bankIban) rows.push(['🔢 IBAN', cfg.bankIban]);
+    if (cfg.bankSwift) rows.push(['🌐 SWIFT/BIC', cfg.bankSwift]);
+    if (cfg.bankUpi) rows.push(['📱 UPI ID', cfg.bankUpi]);
+    const esc = (s) => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-overlay tas-card-modal';
+      wrap.innerHTML = `<div class="modal-card tas-card-modal-card">
+        <div class="modal-title">🏦 Direct bank transfer</div>
+        <p class="modal-subhead">Transfer <strong>${esc(fmtMoney(amount))}</strong> straight into the trainer's account using the details below, then tap "I have transferred". Your coach verifies the payment and your balance clears right after.</p>
+        <div class="bank-details" style="border:1px solid var(--line,#ddd);border-radius:12px;padding:.6rem .8rem;margin:.4rem 0;display:flex;flex-direction:column;gap:.35rem;">
+          ${rows.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;"><span style="opacity:.75;">${esc(k)}</span><strong style="user-select:all;text-align:right;word-break:break-all;" data-bank-val="${esc(v)}">${esc(v)}</strong></div>`).join('')}
+          <div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;"><span style="opacity:.75;">💵 Amount</span><strong data-bank-val="${amount.toFixed(2)}">${fmtMoney(amount)}</strong></div>
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.2rem;">
+          <button class="btn-secondary" id="tasBankCopy" type="button" style="width:auto;">📋 Copy details</button>
+          <a class="btn-secondary" id="tasBankWa" type="button" style="width:auto;text-decoration:none;display:inline-flex;align-items:center;">📲 Send receipt on WhatsApp</a>
+        </div>
+        <label style="display:flex;gap:.5rem;align-items:flex-start;margin-top:.8rem;font-size:.92rem;">
+          <input type="checkbox" id="tasBankDone" style="margin-top:.25rem;" />
+          <span>I have transferred <strong>${fmtMoney(amount)}</strong> to this account.</span>
+        </label>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="tasBankCancel" type="button">Cancel</button>
+          <button class="btn-primary" id="tasBankDeclare" type="button" style="width:auto;" disabled>✅ I have paid — notify my coach</button>
+        </div>
+        <p style="font-size:.8rem;opacity:.7;margin:.4rem 0 0;">⚠️ Until your coach confirms the money arrived, the amount stays due and carries over to next month automatically.</p>
+      </div>`;
+      document.body.appendChild(wrap);
+
+      const waText = `Hi Coach, I have transferred ${fmtMoney(amount)} (${opts.label || ''}) to your account.`;
+      const waNum = (window.APP_CONFIG && APP_CONFIG.TRAINER_WHATSAPP) || '';
+      const waLink = $id('tasBankWa');
+      waLink.href = waNum ? `https://wa.me/${String(waNum).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(waText)}` : '#';
+      if (!waNum) waLink.style.display = 'none';
+
+      $id('tasBankCopy').onclick = () => {
+        const txt = rows.map(([k, v]) => `${k.replace(/^\S+\s/, '')}: ${v}`).join('\n') + `\nAmount: ${amount.toFixed(2)} ${CUR()}`;
+        try { navigator.clipboard.writeText(txt); toast('📋 Bank details copied.', 'success'); }
+        catch (e) { toast('Long-press the values to copy them.', 'info'); }
+      };
+      const done = $id('tasBankDone');
+      done.onchange = () => { $id('tasBankDeclare').disabled = !done.checked; };
+      $id('tasBankCancel').onclick = () => { wrap.remove(); resolve(false); };
+      $id('tasBankDeclare').onclick = async () => {
+        $id('tasBankDeclare').disabled = true;
+        try { await opts.onDeclared(done.checked); } catch (e) {}
+        wrap.remove();
+        resolve(true);
+      };
     });
-  }
-
-  // ============================================================
-  // APPLE PAY (direct, passkit.js.apple.com)
-  // ============================================================
-  async function canUseApplePayDirect() {
-    const cfg = window.getPaymentProviderConfig();
-    if (!cfg.appleMerchantId) return false;
-    if (!(window.ApplePaySession && ApplePaySession.canMakePayments())) return false;
-    try {
-      await loadScript('https://cdn.apple-pay.cdn-apple.com/passkit.passkit.js.apple.com/latest/passkit.js');
-      if (!window.ApplePayValidation || !ApplePayValidation.checkMerchant) return false;
-      const ok = await new Promise((res) => {
-        try {
-          ApplePayValidation.checkMerchant(cfg.appleMerchantId,
-            window.location.origin || undefined, (valid) => res(!!valid));
-        } catch (e) { res(false); }
-      });
-      return !!ok;
-    } catch (e) { return false; }
-  }
-
-  function startApplePayDirect(amount, label, onSuccess, onError) {
-    try {
-      const request = {
-        countryCode: 'AE',
-        currencyCode: CUR(),
-        total: { label: label || 'TAS Personal Training', type: 'final', amount: amount.toFixed(2) },
-        supportedNetworks: ['visa', 'masterCard', 'amex'],
-        merchantCapabilities: ['supports3DS']
-      };
-      const session = new ApplePaySession(4, request);
-      session.onvalidatemerchant = (event) => {
-        ApplePayValidation.checkMerchant(window.getPaymentProviderConfig().appleMerchantId,
-          event.validationURL, (ok) => {
-            if (ok) session.completeMerchantValidation(ok);
-            else { try { session.abort(); } catch (e) {} onError(new Error('Apple Pay merchant validation failed.')); }
-          });
-      };
-      session.onpaymentauthorized = async (event) => {
-        const token = JSON.stringify(event.payment.token || {});
-        const ref = 'applepay:' + token.slice(0, 40);
-        try {
-          await onSuccess(ref);
-          session.completePayment(ApplePaySession.STATUS_SUCCESS);
-        } catch (e) {
-          session.completePayment(ApplePaySession.STATUS_FAILURE);
-          onError(e);
-        }
-      };
-      session.oncancel = () => onError(new Error('cancelled'));
-      session.begin();
-    } catch (e) { onError(e); }
-  }
-
-  // ============================================================
-  // STRIPE Payment Request (Apple Pay + Google Pay + Card buttons)
-  // ============================================================
-  let _stripePromise = null;
-  async function getStripe() {
-    const cfg = window.getPaymentProviderConfig();
-    if (!cfg.stripePk) throw new Error('Stripe publishable key not configured.');
-    await loadScript('https://js.stripe.com/v3/');
-    if (!window.Stripe) throw new Error('Stripe SDK unavailable.');
-    if (!_stripePromise) _stripePromise = window.Stripe(cfg.stripePk);
-    return _stripePromise;
-  }
-
-  async function canUseStripeWallets() {
-    const cfg = window.getPaymentProviderConfig();
-    if (cfg.provider !== 'stripe' || !cfg.stripePk) return { pr: false, card: false };
-    try {
-      const stripe = await getStripe();
-      const pr = stripe.paymentRequest({
-        country: 'AE', currency: CUR().toLowerCase(), total: { label: 'TAS Training', amount: 100 },
-        requestPayerName: true
-      });
-      const available = await pr.canMakePayment();
-      return {
-        pr: !!(available && (available.applePay || available.googlePay)),
-        card: true,
-        applePay: !!(available && available.applePay),
-        googlePay: !!(available && available.googlePay)
-      };
-    } catch (e) { return { pr: false, card: false }; }
-  }
-
-  async function payWithStripe(method, amount, label, onSuccess, onError) {
-    try {
-      const stripe = await getStripe();
-      if (method === 'card') {
-        // Generic card option: modal card element, immediate payment intent style.
-        const elements = stripe.elements({ mode: 'payment', amountInCents: Math.round(amount * 100), currency: CUR().toLowerCase() });
-        const checkout = elements.create('payment');
-        const wrap = document.createElement('div');
-        wrap.className = 'modal-overlay tas-card-modal';
-        wrap.innerHTML = `<div class="modal-card tas-card-modal-card">
-            <div class="modal-title">💳 Pay with card</div>
-            <p class="modal-subhead">${label}</p>
-            <div id="tasCardElement" style="min-height:120px;padding:0.5rem 0;border:1px solid var(--line,#ddd);border-radius:10px;"></div>
-            <div class="modal-actions"><button class="btn-secondary" id="tasCardCancel" type="button">Cancel</button>
-            <button class="btn-primary" id="tasCardPay" type="button" style="width:auto;">Pay ${fmtMoney(amount)}</button></div>
-          </div>`;
-        document.body.appendChild(wrap);
-        wrap.classList.remove('hidden');
-        mount(() => checkout.mount('#tasCardElement'));
-        const cleanup = () => { try { checkout.destroy(); } catch (e) {} wrap.remove(); };
-        $id('tasCardCancel').onclick = () => { cleanup(); onError(new Error('cancelled')); };
-        $id('tasCardPay').onclick = async () => {
-          $id('tasCardPay').disabled = true;
-          const { error, paymentIntent } = await stripe.confirmPayment({ elements, redirect: 'if_required' });
-          cleanup();
-          if (error) onError(error);
-          else onSuccess('card:' + ((paymentIntent && paymentIntent.id) || Date.now()));
-        };
-        return;
-      }
-      // Apple Pay / Google Pay via Payment Request button.
-      const pr = stripe.paymentRequest({
-        country: 'AE', currency: CUR().toLowerCase(),
-        total: { label, amount: Math.round(amount * 100) },
-        requestPayerName: true,
-        ...(method === 'applePay' ? { disableWalletButtons: ['googlePay', 'link'] } : {}),
-        ...(method === 'googlePay' ? { disableWalletButtons: ['applePay', 'link'] } : {})
-      });
-      const btnWrap = document.createElement('div');
-      btnWrap.className = 'modal-overlay tas-card-modal';
-      btnWrap.innerHTML = `<div class="modal-card tas-card-modal-card">
-          <div class="modal-title">${method === 'applePay' ? '' : 'G'}Pay</div>
-          <p class="modal-subhead">${label}</p>
-          <div id="tasPrButton"></div>
-          <div class="modal-actions"><button class="btn-secondary" id="tasPrCancel" type="button">Cancel</button></div>
-        </div>`;
-      document.body.appendChild(btnWrap);
-      const prBtn = pr.button({ theme: method === 'applePay' ? 'black' : 'dark' });
-      prBtn.mount('#tasPrButton');
-      pr.on('token', async ({ complete3DSAuth }) => {
-        const { error } = await stripe.confirmToken({
-          payment_method: 'card',
-          payment_method_data: { card: pr.paymentMethod },
-          confirmation_token: pr.confirmationToken,
-          redirect: 'if_required'
-        });
-        if (!error) { await complete3DSAuth(true); btnWrap.remove(); onSuccess(method + ':' + (pr.confirmationToken || Date.now())); }
-        else { await complete3DSAuth(false); btnWrap.remove(); onError(error); }
-      });
-      $id('tasPrCancel').onclick = () => { btnWrap.remove(); onError(new Error('cancelled')); };
-    } catch (e) { onError(e); }
-  }
-
-  function mount(fn) { requestAnimationFrame(fn); }
+  };
 
   // ============================================================
   // MASTER PAY FLOW — picks the best available option
@@ -448,26 +388,31 @@
 
     busy(true);
     try {
-      // 1 · Stripe configured → Apple Pay / Google Pay / Card via Stripe.
-      if (cfg.provider === 'stripe' && cfg.stripePk) {
+      // 1 · 🏦 Direct bank transfer to the trainer's OWN account — no gateway,
+      //     no keys. Money lands straight in the trainer's bank; the client
+      //     declares the transfer (status 'pending') and the balance only
+      //     clears once the trainer approves it in the Payments panel.
+      if (hasBankDetails(cfg)) {
         busy(false);
-        const hint = opts.methodHint;
-        if (hint === 'card') return payWithStripe('card', amount, label, (ref) => finalize('card', ref), fail);
-        return payWithStripe(hint === 'googlePay' ? 'googlePay' : 'applePay', amount, label,
-          (ref) => finalize(hint === 'googlePay' ? 'google_pay' : 'apple_pay', ref), fail);
+        await window.tasShowBankTransferModal({
+          amount, label,
+          onDeclared: async () => {
+            const res = await persistPayment(c.id, invoiceKey, 'bank_transfer', amount,
+              'declared:' + nowStamp(), 'pending');
+            toast('🏦 Transfer noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
+            renderAll();
+            if (typeof window.refreshClientPortalViews === 'function') window.refreshClientPortalViews();
+          }
+        });
+        return;
       }
-      // 2 · Apple Pay Direct configured and device supports it.
-      if ((cfg.provider === 'apple_pay_direct' || cfg.appleMerchantId) && await canUseApplePayDirect()) {
-        busy(false);
-        return startApplePayDirect(amount, label, (ref) => finalize('apple_pay', ref), fail);
-      }
-      // 3 · No PSP configured → offline/cash acknowledgement so the ledger
-      //     still works (trainer verifies actual settlement separately).
+      // 2 · No bank details configured yet → offline/cash acknowledgement so
+      //     the ledger still works (trainer verifies actual settlement separately).
       busy(false);
       const conf = (typeof window.uiConfirm === 'function')
         ? await window.uiConfirm({
             title: '💳 Confirm payment',
-            message: `Record your payment of ${fmtMoney(amount)} for ${label}? This marks the balance as PAID in your portal. (Apple Pay / Google Pay / Card become available once the trainer connects a payment provider.)`,
+            message: `Record your payment of ${fmtMoney(amount)} for ${label}? Your coach will verify the money arrived before the balance is fully cleared.`,
             confirmText: '✅ I have paid', cancelText: 'Cancel'
           })
         : window.confirm(`Record payment of ${fmtMoney(amount)} for ${label}?`);
@@ -516,38 +461,41 @@
   function methodButtonHTML() {
     const cfg = window.getPaymentProviderConfig();
     const btns = [];
-    if (cfg.provider === 'stripe' && cfg.stripePk) {
-      btns.push(`<button class="pay-method-btn pay-apple" data-pay-method="applePay" type="button" hidden><span class="pm-logo"></span> Pay <span class="pm-with">Apple Pay</span></button>`);
-      btns.push(`<button class="pay-method-btn pay-google" data-pay-method="googlePay" type="button" hidden><span class="pm-logo"></span> Pay with <b>G</b><span class="g-c1">o</span><span class="g-c2">o</span><span class="g-c3">g</span><span class="g-c4">l</span><span class="g-c5">e</span> Pay</button>`);
-      btns.push(`<button class="pay-method-btn pay-card" data-pay-method="card" type="button" hidden>💳 Pay with Card</button>`);
-    } else {
-      btns.push(`<button class="pay-method-btn pay-apple" data-pay-method="applePay" type="button" hidden><span class="pm-logo"></span> Pay <span class="pm-with">Apple Pay</span></button>`);
+    // 🏦 Direct transfer into the trainer's own bank account (no gateway).
+    if (hasBankDetails(cfg)) {
+      btns.push(`<button class="pay-method-btn pay-bank" data-pay-method="bank" type="button">🏦 Bank Transfer <span class="pm-note">(direct to coach's account)</span></button>`);
     }
-    btns.push(`<button class="pay-method-btn pay-offline" data-pay-method="offline" type="button">✔️ Record payment <span class="pm-note">(bank transfer / cash)</span></button>`);
+    // PayPal.me — pays straight into the trainer's PayPal wallet.
+    if (cfg.paypalLink) {
+      btns.push(`<button class="pay-method-btn pay-paypal" data-pay-method="paypal" type="button">🅿️ PayPal <span class="pm-note">(opens paypal.me)</span></button>`);
+    }
+    if (!hasBankDetails(cfg) && !cfg.paypalLink) {
+      btns.push(`<button class="pay-method-btn pay-offline" data-pay-method="offline" type="button">✔️ Record payment <span class="pm-note">(bank transfer / cash)</span></button>`);
+    }
     return btns.join('');
   }
 
-  let _walletProbeDone = false;
-  async function revealSupportedWallets() {
-    if (_walletProbeDone) return;
-    _walletProbeDone = true;
-    const cfg = window.getPaymentProviderConfig();
-    const appleBtn = document.querySelector('#paymentMethods .pay-apple');
-    const gpayBtn = document.querySelector('#paymentMethods .pay-google');
-    const cardBtn = document.querySelector('#paymentMethods .pay-card');
-    try {
-      if (cfg.provider === 'stripe' && cfg.stripePk) {
-        const caps = await canUseStripeWallets();
-        if (caps.pr) {
-          if (caps.applePay && appleBtn) appleBtn.hidden = false;
-          if (caps.googlePay && gpayBtn) gpayBtn.hidden = false;
-        }
-        if (caps.card && cardBtn) cardBtn.hidden = false;
-        if (cardBtn) cardBtn.hidden = false; // card always works with Stripe
-      } else if (await canUseApplePayDirect()) {
-        if (appleBtn) appleBtn.hidden = false;
-      }
-    } catch (e) { /* keep buttons hidden */ }
+  async function declarePaidViaExternal(methodKey, cloudMethod, c, info, link) {
+    const amount = info.totalDue;
+    if (amount <= 0) { toast('✅ You have nothing due — enjoy your training!', 'success'); return; }
+    const keys = collectUnpaidKeys(info);
+    const invoiceKey = keys.slice().sort().join('+');
+    const label = `TAS Personal Training — ${keys.map(monthLabel).join(', ')}`;
+    // Open the direct payment destination in a new tab (pop-up blockers:
+    // triggered from a user click so window.open is allowed).
+    try { window.open(link, '_blank', 'noopener'); } catch (e) {}
+    const conf = (typeof window.uiConfirm === 'function')
+      ? await window.uiConfirm({
+          title: '🅿️ Confirm PayPal payment',
+          message: `Have you completed the payment of ${fmtMoney(amount)} (${label}) via PayPal? Your coach will verify and your balance clears once confirmed.`,
+          confirmText: '✅ I have paid', cancelText: 'Not yet'
+        })
+      : window.confirm(`Have you completed the PayPal payment of ${fmtMoney(amount)}?`);
+    if (!conf) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
+    const res = await persistPayment(c.id, invoiceKey, cloudMethod, amount, 'declared:' + nowStamp(), 'pending');
+    toast('💶 Payment noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
+    renderAll();
+    if (typeof window.refreshClientPortalViews === 'function') window.refreshClientPortalViews();
   }
 
   function bindPaymentEvents(card) {
@@ -562,6 +510,21 @@
         const method = btn.dataset.payMethod;
         if (method === 'offline') {
           window.tasPayNow({ clientId: c.id, amount: info.totalDue, monthKeys: collectUnpaidKeys(info), methodHint: null });
+        } else if (method === 'bank') {
+          if (info.allClear) { toast('✅ Nothing due — enjoy your training!', 'success'); return; }
+          window.tasShowBankTransferModal({
+            amount: info.totalDue,
+            label: `TAS Personal Training — ${collectUnpaidKeys(info).map(monthLabel).join(', ')}`,
+            onDeclared: async () => {
+              const keys = collectUnpaidKeys(info);
+              const res = await persistPayment(c.id, keys.slice().sort().join('+'), 'bank_transfer', info.totalDue, 'declared:' + nowStamp(), 'pending');
+              toast('🏦 Transfer noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
+              renderAll();
+            }
+          });
+        } else if (method === 'paypal') {
+          const cfgP = window.getPaymentProviderConfig();
+          declarePaidViaExternal('paypal', 'paypal', c, info, cfgP.paypalLink);
         } else {
           window.tasPayNow({ clientId: c.id, amount: info.totalDue, monthKeys: collectUnpaidKeys(info), methodHint: method });
         }
@@ -623,10 +586,19 @@
         if (info.allClear) offBtn.innerHTML = '✅ Nothing due — thank you!';
         else offBtn.innerHTML = `✔️ Record payment <span class="pm-note">${fmtMoney(info.totalDue)}</span>`;
       }
-      methods.querySelectorAll('[data-pay-method^="apple"],[data-pay-method="googlePay"],[data-pay-method="card"]')
-        .forEach(b => { b.disabled = info.allClear; });
+      const bankBtn = methods.querySelector('.pay-bank');
+      if (bankBtn) {
+        bankBtn.disabled = info.allClear;
+        if (info.allClear) bankBtn.innerHTML = '✅ Nothing due — thank you!';
+        else bankBtn.innerHTML = `🏦 Bank Transfer <span class="pm-note">${fmtMoney(info.totalDue)} direct to coach</span>`;
+      }
+      const ppBtn = methods.querySelector('.pay-paypal');
+      if (ppBtn) {
+        ppBtn.disabled = info.allClear;
+        if (info.allClear) ppBtn.innerHTML = '✅ Nothing due — thank you!';
+        else ppBtn.innerHTML = `🅿️ PayPal <span class="pm-note">${fmtMoney(info.totalDue)}</span>`;
+      }
     }
-    revealSupportedWallets();
 
     // Update the headline tile: total DUE (with carry-over), not just this month.
     const tile = $id('clientDashAmount');
@@ -642,20 +614,194 @@
         if (seen[k]) return false; seen[k] = 1; return true;
       }).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 12);
       hist.innerHTML = all.length
-        ? all.map(p => `<div class="payment-history-row">
+        ? all.map(p => {
+            const st = String(p.status || 'paid');
+            return `<div class="payment-history-row">
             <span class="ph-when">${monthLabel(p.invoice_key)}</span>
             <span class="ph-method">${methodLabel(p.method)}</span>
             <span class="ph-amt">${fmtMoney(p.amount_due)}</span>
-            <span class="ph-status paid">PAID</span></div>`).join('')
+            <span class="ph-status ${st === 'paid' ? 'paid' : 'pending'}"${st !== 'paid' ? ' style="color:#b7791f;"' : ''}>${st === 'paid' ? 'PAID' : (st === 'rejected' ? 'NOT RECEIVED' : 'PENDING')}</span></div>`;
+          }).join('')
         : `<div class="payment-history-empty">No payments yet — your statement appears above.</div>`;
+    }
+
+    // Pending-transfer note (declared but awaiting coach verification).
+    if (breakdown && !info.allClear) {
+      const pend = getPendingTransfers(c.id);
+      if (pend.length) {
+        breakdown.insertAdjacentHTML('beforeend',
+          `<div class="payment-pending-note" style="font-size:.85rem;opacity:.8;margin-top:.3rem;">⏳ Awaiting coach verification: ${pend.map(p => fmtMoney(p.amount_due)).join(', ')} — your balance clears as soon as your coach confirms the money arrived.</div>`);
+      }
     }
   };
 
+  // ============================================================
+  // 🛠 ADMIN — verify & approve declared transfers + bank details
+  // ------------------------------------------------------------
+  // Floating panel on the ADMIN dashboard only. The trainer checks their
+  // real bank account, taps "✅ Money received" and the client's amount
+  // due clears instantly (row flips to 'paid'). "❌ Not received" keeps
+  // the balance due so it carries over next month. Bank/PayPal details
+  // are editable here and stored in admin_config (cloud) so every client
+  // portal shows them without redeploying.
+  // ============================================================
+  function isAdminSession() {
+    try {
+      const sess = (typeof window.tasLoadSession === 'function') ? window.tasLoadSession() : null;
+      return (sess && sess.role === 'admin') || !!document.getElementById('adminDashboard');
+    } catch (e) { return false; }
+  }
+
+  function ensureAdminPaymentPanel() {
+    let panel = document.getElementById('adminPaymentPanelFab');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'adminPaymentPanelFab';
+      panel.style.cssText = 'position:fixed;right:14px;bottom:86px;z-index:1200;max-width:min(420px,calc(100vw - 28px));max-height:70vh;overflow:auto;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:.9rem 1rem;';
+      document.body.appendChild(panel);
+    }
+    return panel;
+  }
+
+  window.renderAdminPaymentPanel = function () {
+    const panel = ensureAdminPaymentPanel();
+    const show = APP_STATE && isAdminSession();
+    panel.style.display = show ? '' : 'none';
+    if (!show) return;
+
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
+    const cfg = window.getPaymentProviderConfig();
+    const pending = (APP_STATE.clientPayments || [])
+      .concat(readLocalPayments())
+      .filter(p => String(p.status) === 'pending');
+    // Deduplicate declarations (same client+invoice+timestamp)
+    const seenKeys = {};
+    const rows = pending.filter(p => {
+      const k = `${p.client_id}|${p.invoice_key}|${p.created_at || ''}`;
+      if (seenKeys[k]) return false; seenKeys[k] = 1; return true;
+    });
+
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
+        <strong>💳 Incoming Payments</strong>
+        <button class="btn-secondary btn-small" id="apToggleBody" type="button" style="width:auto;">${rows.length ? `🔔 ${rows.length} pending` : '⚙️ Settings'}</button>
+      </div>
+      <div id="apBody" class="hidden" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem;">
+        <div style="font-size:.8rem;opacity:.75;">Verify money actually landed in YOUR bank/PayPal, then approve. Only approved payments clear a client's amount due; rejected ones stay due and carry over.</div>
+        <div id="adminPendingList" style="display:flex;flex-direction:column;gap:.5rem;"></div>
+        <details style="margin-top:.3rem;">
+          <summary style="cursor:pointer;font-weight:600;">⚙️ Bank / PayPal details shown to clients</summary>
+          <div style="display:grid;gap:.5rem;margin-top:.6rem;">
+            <input class="input" id="apBankName" placeholder="Bank name" value="${esc(cfg.bankName)}" />
+            <input class="input" id="apBankAcctName" placeholder="Account holder name" value="${esc(cfg.bankAccountName)}" />
+            <input class="input" id="apBankIban" placeholder="IBAN" value="${esc(cfg.bankIban)}" />
+            <input class="input" id="apBankSwift" placeholder="SWIFT/BIC (optional)" value="${esc(cfg.bankSwift)}" />
+            <input class="input" id="apBankUpi" placeholder="UPI ID (optional)" value="${esc(cfg.bankUpi)}" />
+            <input class="input" id="apPaypal" placeholder="PayPal.me link (optional)" value="${esc(cfg.paypalLink)}" />
+            <button class="btn-primary" id="apSaveBank" type="button" style="width:auto;">💾 Save payment details</button>
+          </div>
+        </details>
+      </div>`;
+
+    const body = panel.querySelector('#apBody');
+    if (rows.length) body.classList.remove('hidden');
+    panel.querySelector('#apToggleBody').onclick = () => body.classList.toggle('hidden');
+
+    const list = panel.querySelector('#adminPendingList');
+    list.innerHTML = rows.length
+      ? rows.map(p => `
+        <div style="border:1px solid var(--line,#ddd);border-radius:12px;padding:.55rem .7rem;">
+          <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;">
+            <strong>${esc(nameOf(p.client_id))}</strong>
+            <span>${esc(fmtMoney(p.amount_due))}</span>
+          </div>
+          <div style="font-size:.78rem;opacity:.7;margin:.15rem 0 .4rem;">${esc(monthLabel(String(p.invoice_key || '').split('+').slice(-1)[0]))}${String(p.invoice_key || '').includes('+') ? ' (+ carried months)' : ''} · ${esc(methodLabel(p.method))} · ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '')}</div>
+          <div style="display:flex;gap:.4rem;">
+            <button class="btn-secondary btn-small" data-reject-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
+            <button class="btn-primary btn-small" data-approve-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">✅ Money received</button>
+          </div>
+        </div>`).join('')
+      : `<div style="opacity:.7;">✅ No transfers awaiting verification.</div>`;
+
+    panel.onclick = async (ev) => {
+      const ap = ev.target.closest('[data-approve-pay]');
+      const rj = ev.target.closest('[data-reject-pay]');
+      if (ap) { await settleTransfer(ap.dataset.approvePay, ap.dataset.lcClient, ap.dataset.lcKey, 'paid', Number((ap.closest('div').querySelector('span') || {}).textContent) || 0); }
+      else if (rj) { await settleTransfer(rj.dataset.rejectPay, rj.dataset.lcClient, rj.dataset.lcKey, 'rejected'); }
+      else if (ev.target.closest('#apSaveBank')) {
+        const ac = APP_STATE.adminConfig || (APP_STATE.adminConfig = {});
+        ac.bank_name = $id('apBankName').value.trim();
+        ac.bank_account_name = $id('apBankAcctName').value.trim();
+        ac.bank_iban = $id('apBankIban').value.trim();
+        ac.bank_swift = $id('apBankSwift').value.trim();
+        ac.bank_upi_id = $id('apBankUpi').value.trim();
+        ac.paypal_me_link = $id('apPaypal').value.trim();
+        const sb = APP_STATE.supabaseClient;
+        if (sb) {
+          try {
+            const { error } = await sb.from('admin_config').update({
+              bank_name: ac.bank_name, bank_account_name: ac.bank_account_name,
+              bank_iban: ac.bank_iban, bank_swift: ac.bank_swift,
+              bank_upi_id: ac.bank_upi_id, paypal_me_link: ac.paypal_me_link
+            }).eq('id', 1);
+            if (error) throw error;
+            toast('💾 Payment details saved — all client portals now show them.', 'success');
+          } catch (e) {
+            toast('💾 Saved on this device. Run sql/client_payments.sql once in Supabase to store these in the cloud for everyone.', 'warning', 6500);
+          }
+        } else toast('💾 Saved on this device (offline).', 'warning');
+        renderAll();
+      }
+    };
+  };
+
+  // Approve/reject a pending declaration: update the cloud row when it has
+  // an id; always flip the mirrored localStorage/in-memory rows too.
+  async function settleTransfer(rowId, clientId, invoiceKey, newStatus, amount) {
+    const sb = APP_STATE.supabaseClient;
+    let cloudDone = false;
+    if (sb && rowId) {
+      try {
+        const { error } = await sb.from('client_payments').update({ status: newStatus }).eq('id', rowId);
+        cloudDone = !error;
+        if (error) toast('⚠️ Cloud update failed: ' + error.message, 'error');
+      } catch (e) { toast('⚠️ Cloud update failed: ' + e.message, 'error'); }
+    }
+    const loc = readLocalPayments();
+    let touched = false;
+    loc.forEach(p => {
+      if (String(p.client_id) === String(clientId) && p.invoice_key === invoiceKey && String(p.status) === 'pending') {
+        p.status = newStatus; touched = true;
+      }
+    });
+    if (touched) writeLocalPayments(loc);
+    (APP_STATE.clientPayments || []).forEach(p => {
+      if ((rowId && String(p.id) === String(rowId)) ||
+          (sameId(p.client_id, clientId) && p.invoice_key === invoiceKey && String(p.status) === 'pending')) {
+        p.status = newStatus;
+      }
+    });
+    if (!cloudDone && sb && newStatus === 'paid') {
+      // Declaration was made offline (localStorage only) — push a paid row now.
+      try {
+        await sb.from('client_payments').insert({
+          client_id: String(clientId), invoice_key: invoiceKey, amount_due: amount || 0,
+          currency: CUR(), method: 'bank_transfer', reference: 'approved-offline-declaration', status: 'paid'
+        });
+      } catch (e) {}
+    }
+    toast(newStatus === 'paid'
+      ? '✅ Approved — the client\'s balance is cleared.'
+      : '❌ Marked as not received — the amount stays due and carries over.', newStatus === 'paid' ? 'success' : 'info', 5000);
+    window.renderAdminPaymentPanel();
+    renderAll();
+  }
+
   function methodLabel(m) {
     switch (String(m || '')) {
-      case 'apple_pay': return ' Pay';
-      case 'google_pay': return 'G Pay';
-      case 'card': return '💳 Card';
+      case 'bank_transfer': return '🏦 Bank Transfer';
+      case 'paypal': return '🅿️ PayPal';
       default: return '🏦 Transfer/Cash';
     }
   }
@@ -665,6 +811,7 @@
       const c = APP_STATE && APP_STATE.loggedInClient;
       if (c) window.renderPaymentCard(c);
     } catch (e) { console.warn('renderPaymentCard:', e); }
+    try { window.renderAdminPaymentPanel(); } catch (e) {}
   }
 
   // Re-render after every global data load / login (defensive wrappers —
@@ -683,6 +830,8 @@
     };
     try { wrap(window, 'renderClientDashboard'); } catch (e) {}
     try { wrap(window, 'loadAllData'); } catch (e) {}
+    try { wrap(window, 'openAdminDashboard'); } catch (e) {}
+    try { wrap(window, 'renderHomeStats'); } catch (e) {}
   }
 
   // ============================================================

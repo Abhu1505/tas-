@@ -101,11 +101,15 @@
       const key = `${yy}-${String(mm + 1).padStart(2, '0')}`;
       const rows = APP_STATE.clientPayments || [];
       const covers = (r) => String(r.invoice_key || '').split('+').indexOf(key) !== -1;
-      return rows.some(r => String(r.client_id ?? '') === String(cid) && covers(r)) ||
-        (() => { try {
+      // Only 'paid' rows count as settled — 'pending' bank-transfer
+      // declarations are still outstanding until the trainer approves them.
+      const isLocalPaid = () => {
+        try {
           const loc = JSON.parse(localStorage.getItem('tas_client_payments_v1') || '[]');
-          return loc.some(r => String(r.client_id) === String(cid) && covers(r));
-        } catch (e) { return false; })();
+          return loc.some(r => String(r.client_id) === String(cid) && covers(r) && String(r.status || 'paid') === 'paid');
+        } catch (e) { return false; }
+      };
+      return rows.some(r => String(r.client_id ?? '') === String(cid) && covers(r) && String(r.status || 'paid') === 'paid') || isLocalPaid();
     };
     active.forEach(c => {
       const n = (typeof getSessions === 'function' ? getSessions(c.id, y, m).length : 0);
