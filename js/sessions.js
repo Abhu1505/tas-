@@ -302,6 +302,13 @@ async function submitClientTimeProposal(dateStr, newTime, current) {
     proposed_data: { class_time: newTime || null },
     current_time: curT,
     current_note: current ? current.note : null
+  }).then(async (sent) => {
+    if (sent) {
+      showToast('🕓 Time change sent to your trainer — it applies only after they approve it in ✅ Approvals.', 'info', 5000);
+      // Live "awaiting approval" chip on the schedule row + day sheet.
+      if (typeof renderClientUpcoming === 'function') renderClientUpcoming(c);
+      if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+    }
   });
 }
 

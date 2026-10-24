@@ -83,6 +83,67 @@
     writeLocalPayments(list);
   }
 
+  // ---- payment cut-off stamping (🆕 post-payment sessions) ---------------
+  // When an invoice is settled we store the exact settlement moment on the
+  // paid row (`paid_at`). The balance engine then only counts sessions whose
+  // own check-in happened AFTER that stamp for a paid month — so once a
+  // payment clears, any NEW session created after it immediately shows up as
+  // pending amount again, while already-billed sessions never get re-charged.
+  function toTimeVal(v) {
+    if (!v) return NaN;
+    const t = new Date(v).getTime();
+    return isNaN(t) ? NaN : t;
+  }
+  // Latest 'paid' settlement timestamp covering (client, month key), or null
+  // when no such column/value exists anywhere (legacy rows → treat as open).
+  function getInvoicePaidAt(clientId, mk) {
+    const covers = (p) => String(p.invoice_key || '').split('+').indexOf(mk) !== -1;
+    let best = null, sawColumn = false;
+    const scan = (rows, idEq) => {
+      (rows || []).forEach(p => {
+        if (!idEq(p) || !covers(p) || String(p.status || 'paid') !== 'paid') return;
+        if ('paid_at' in p) sawColumn = true;
+        const t = toTimeVal(p.paid_at || p.created_at);
+        if (!isNaN(t) && (!best || t > best)) best = t;
+      });
+    };
+    scan((window.APP_STATE && APP_STATE.clientPayments) || [],
+      p => sameId(p.client_id, clientId));
+    scan(readLocalPayments(),
+      p => String(p.client_id) === String(clientId));
+    return sawColumn ? best : null;
+  }
+  function setInvoicePaidAt(clientId, invoiceKey, isoStamp) {
+    const apply = (p) => {
+      if (String(p.invoice_key || '') === String(invoiceKey) &&
+          String(p.status || 'paid') === 'paid') p.paid_at = isoStamp;
+    };
+    ((window.APP_STATE && window.APP_STATE.clientPayments) || [])
+      .forEach(p => { if (sameId(p.client_id, clientId)) apply(p); });
+    const loc = readLocalPayments();
+    loc.forEach(p => { if (String(p.client_id) === String(clientId)) apply(p); });
+    writeLocalPayments(loc);
+  }
+  async function persistPaidAt(clientId, invoiceKey, isoStamp) {
+    const sb = APP_STATE.supabaseClient;
+    if (!sb) return;
+    try {
+      const { error } = await sb.from('client_payments')
+        .update({ paid_at: isoStamp })
+        .eq('client_id', String(clientId)).eq('invoice_key', String(invoiceKey))
+        .eq('status', 'paid');
+      if (error) throw error;
+    } catch (e) { /* column not migrated yet — local mirror still works */ }
+  }
+  // Count sessions in a month that were checked in strictly after `afterT`
+  // (null/NaN → every session counts). Sessions without a timestamp are
+  // always counted so nothing silently goes unbilled.
+  function countSessionsAfter(clientId, y, m, afterT) {
+    const list = (typeof getSessions === 'function' ? getSessions(clientId, y, m) : []) || [];
+    if (isNaN(afterT)) return list.length;
+    return list.filter(s => { const t = toTimeVal(s.checked_at); return isNaN(t) || t > afterT; }).length;
+  }
+
   // Is a given (client, month) already settled? Checks the cloud rows first,
   // then the local mirror — so a completed payment clears the amount due
   // immediately, even before the next full data reload. A paid invoice row
@@ -117,7 +178,12 @@
 
   // ============================================================
   // BALANCE ENGINE — current month + carry-over of unpaid months
-  // ============================================================
+  // ------------------------------------------------------------
+  // 🆕 Payment cut-off: every settled ('paid') invoice remembers its
+  // settlement moment (`paid_at`). Sessions whose check-in happened AFTER
+  // that stamp are billed again — so once a payment is cleared, any new
+  // session created after it (same month or a past paid month) immediately
+  // shows up as pending amount instead of hiding behind the paid invoice.
   // Returns { sessions, rate, monthDue, carryAmount, carryMonths[],
   //           totalDue, thisMonthPaid, allClear }
   window.getBalanceInfo = function (clientId, opts) {
@@ -130,10 +196,18 @@
     const rate = getRate(clientId);
 
     // 1 · Current month's session charges.
-    const sessions = getSessions(clientId, y, m).length;
-    const monthDue = sessions * rate;
+    //     🆕 Payment cut-off: if this month was already settled, only
+    //     sessions CHECKED IN AFTER the settlement stamp count — so a new
+    //     session created after a cleared payment immediately shows up as
+    //     pending amount instead of hiding behind the paid invoice.
     const curKey = monthKeyOf(y, m);
-    const thisMonthPaid = isInvoicePaid(clientId, curKey);
+    const curPaidAt = getInvoicePaidAt(clientId, curKey);
+    const billableSessions = (curPaidAt != null)
+      ? countSessionsAfter(clientId, y, m, curPaidAt)
+      : getSessions(clientId, y, m).length;
+    const sessions = getSessions(clientId, y, m).length;
+    const monthDue = billableSessions * rate;
+    const thisMonthPaid = isInvoicePaid(clientId, curKey) && billableSessions === 0;
 
     // 2 · Carry-over: every PAST month since billing began whose invoice was
     //     never paid. The session cache only holds ~3 years of history
@@ -147,12 +221,19 @@
     let guard = 0;
     while ((cy > stopYear || (cy === stopYear && cm >= 0)) && guard++ < 48) {
       const key = monthKeyOf(cy, cm);
-      const n = getSessions(clientId, cy, cm).length;
+      // 🆕 Same payment cut-off for past months: a settled month only
+      // re-appears as carry-over when sessions were created AFTER it was
+      // paid off (e.g. the trainer marked an extra session for last month).
+      const paidAt = getInvoicePaidAt(clientId, key);
+      const n = (paidAt != null)
+        ? countSessionsAfter(clientId, cy, cm, paidAt)
+        : getSessions(clientId, cy, cm).length;
       const amt = n * rate;
       if (amt > 0) {
         if (!isInvoicePaid(clientId, key)) {
           carry.push({ key, label: monthLabel(key), sessions: n, amount: amt });
         } else {
+          carry.push({ key, label: monthLabel(key), sessions: n, amount: amt, newSincePayment: true });
           break; // everything older than a settled month is settled too
         }
       }
@@ -208,6 +289,9 @@
       currency: CUR(), method, reference: ref || '', status,
       created_at: new Date().toISOString()
     };
+    // 🆕 Payment cut-off stamp: 'paid' rows remember the exact settlement
+    // moment so the balance engine can bill sessions created afterwards.
+    if (status === 'paid') rec.paid_at = rec.created_at;
     addLocalPayment(rec);
     if (APP_STATE.clientPayments) {
       if (!APP_STATE.clientPayments.some(p => sameId(p.client_id, clientId) && p.invoice_key === mk && p.status === status)) {
@@ -226,7 +310,22 @@
     if (!sb) return Promise.resolve({ ok: true, cloud: false });
     return sb.from('client_payments').insert({
       client_id: String(clientId), invoice_key: mk, amount_due: amount,
-      currency: CUR(), method, reference: ref || '', status
+      currency: CUR(), method, reference: ref || '', status,
+      // 🆕 Settlement cut-off stamp (null for 'pending' declarations — the
+      // column is added by sql/client_payments.sql; if it doesn't exist yet
+      // the insert fails and the local mirror + retry queue keep working).
+      paid_at: (status === 'paid') ? rec.created_at : null
+    }).then(({ error }) => {
+      if (error) {
+        // Older schema without paid_at? Retry once WITHOUT the new column so
+        // payments never get lost on unmigrated databases.
+        const clone = Object.assign({}, rec); delete clone.paid_at;
+        return sb.from('client_payments').insert({
+          client_id: String(clientId), invoice_key: mk, amount_due: amount,
+          currency: CUR(), method, reference: ref || '', status
+        }).then(({ error: e2 }) => ({ error: e2 })).catch(() => ({ error }));
+      }
+      return { ok: true };
     }).then(({ error }) => {
       if (error) {
         // Queue for retry on next load (e.g. table migration not run yet).
@@ -706,7 +805,7 @@
       if (info.carryMonths.length) {
         html += `<div class="payment-carry-title">📌 Carried over from previous months</div>`;
         html += info.carryMonths.map(m =>
-          `<div class="payment-line carry"><span>${m.label} — ${m.sessions} session${m.sessions === 1 ? '' : 'es'}</span><strong>${fmtMoney(m.amount)}</strong></div>`).join('');
+          `<div class="payment-line carry"><span>${m.label} — ${m.sessions} session${m.sessions === 1 ? '' : 'es'}${m.newSincePayment ? ' <em style="opacity:.75;font-size:.85em;">(new since last payment)</em>' : ''}</span><strong>${fmtMoney(m.amount)}</strong></div>`).join('');
       }
       breakdown.innerHTML = html;
     }
@@ -973,9 +1072,17 @@
   async function settleTransfer(rowId, clientId, invoiceKey, newStatus, amount) {
     const sb = APP_STATE.supabaseClient;
     let cloudDone = false;
+    // 🆕 Settlement cut-off stamp — recorded the moment money is approved so
+    // sessions created AFTER this payment immediately show as pending amount.
+    const settleStamp = new Date().toISOString();
     if (sb && rowId) {
       try {
-        const { error } = await sb.from('client_payments').update({ status: newStatus }).eq('id', rowId);
+        const upd = (newStatus === 'paid') ? { status: newStatus, paid_at: settleStamp } : { status: newStatus };
+        let { error } = await sb.from('client_payments').update(upd).eq('id', rowId);
+        if (error && newStatus === 'paid' && /paid_at/i.test(String(error.message || ''))) {
+          // Column not migrated yet — flip status only.
+          ({ error } = await sb.from('client_payments').update({ status: newStatus }).eq('id', rowId));
+        }
         cloudDone = !error;
         if (error) toast('⚠️ Cloud update failed: ' + error.message, 'error');
       } catch (e) { toast('⚠️ Cloud update failed: ' + e.message, 'error'); }
@@ -985,6 +1092,7 @@
     loc.forEach(p => {
       if (String(p.client_id) === String(clientId) && p.invoice_key === invoiceKey && String(p.status) === 'pending') {
         p.status = newStatus; touched = true;
+        if (newStatus === 'paid') p.paid_at = settleStamp;
       }
     });
     if (touched) writeLocalPayments(loc);
@@ -992,6 +1100,7 @@
       if ((rowId && String(p.id) === String(rowId)) ||
           (sameId(p.client_id, clientId) && p.invoice_key === invoiceKey && String(p.status) === 'pending')) {
         p.status = newStatus;
+        if (newStatus === 'paid') p.paid_at = settleStamp;
       }
     });
     if (!cloudDone && sb && newStatus === 'paid') {
@@ -999,10 +1108,12 @@
       try {
         await sb.from('client_payments').insert({
           client_id: String(clientId), invoice_key: invoiceKey, amount_due: amount || 0,
-          currency: CUR(), method: 'bank_transfer', reference: 'approved-offline-declaration', status: 'paid'
+          currency: CUR(), method: 'bank_transfer', reference: 'approved-offline-declaration',
+          status: 'paid', paid_at: settleStamp
         });
       } catch (e) {}
     }
+    if (newStatus === 'paid') setInvoicePaidAt(clientId, invoiceKey, settleStamp);
     toast(newStatus === 'paid'
       ? '✅ Approved — the client\'s balance is cleared.'
       : '❌ Marked as not received — the amount stays due and carries over.', newStatus === 'paid' ? 'success' : 'info', 5000);

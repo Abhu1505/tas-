@@ -50,3 +50,8 @@ alter table public.admin_config add column if not exists bank_iban text;
 alter table public.admin_config add column if not exists bank_swift text;
 alter table public.admin_config add column if not exists bank_upi_id text;
 alter table public.admin_config add column if not exists paypal_me_link text;
+-- 🆕 Payment cut-off: 'paid_at' records the exact settlement moment of a
+-- paid invoice. The balance engine (js/payments.js) bills sessions whose
+-- check-in happened AFTER this stamp, so new sessions created after a
+-- cleared payment immediately show up as pending amount again.
+alter table if exists public.client_payments add column if not exists paid_at timestamptz;

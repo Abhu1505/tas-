@@ -2625,3 +2625,39 @@ button:not(:disabled):active{transform:translateY(0) scale(.98);}
   #bgWatermark .bg-beam{opacity:.12;transform:rotate(18deg);}
   .card:hover,.dash-card:hover,.section-card:hover,.client-upcoming-item:hover{transform:none;}
 }
+
+/* ============================================================
+   v44 — Extra attraction: attention pulse on awaiting-approval chips,
+   animated approval cards, and a fresh "send" pop for time requests.
+   ============================================================ */
+
+/* ---- 🕓 Awaiting-approval chips gently pulse to draw the eye ---- */
+.lock-status-chip{animation:chipPulse 2.6s ease-in-out infinite;}
+@keyframes chipPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(232,118,39,.0);transform:translateY(0);}
+  50%{box-shadow:0 0 0 5px rgba(232,118,39,.14);transform:translateY(-1px);}
+}
+
+/* ---- Approval cards slide/fade in + hover lift (admin ✅ Approvals) ---- */
+.approval-card{animation:apCardIn .45s var(--ease, cubic-bezier(.22,.9,.3,1)) both;
+  transition:transform .22s var(--ease,cubic-bezier(.22,.9,.3,1)),box-shadow .22s var(--ease,cubic-bezier(.22,.9,.3,1));}
+.approval-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md,0 10px 24px rgba(20,40,60,.14));}
+@keyframes apCardIn{from{opacity:0;transform:translateY(14px) scale(.985);}to{opacity:1;transform:none;}}
+/* stagger the first few cards so a full list cascades in attractively */
+.approval-card:nth-child(2){animation-delay:.06s}.approval-card:nth-child(3){animation-delay:.12s}
+.approval-card:nth-child(4){animation-delay:.18s}.approval-card:nth-child(5){animation-delay:.24s}
+.approval-card:nth-child(n+6){animation-delay:.3s}
+
+/* ---- 🕐 The client time sheet pops in with a springy entrance ---- */
+#clientTimeSheet .modal-card{animation:tsPopIn .38s cubic-bezier(.2,1.35,.4,1) both;}
+@keyframes tsPopIn{from{opacity:0;transform:translateY(26px) scale(.92);}to{opacity:1;transform:none;}}
+#clientTimeSheet #ctsSend{animation:btnShine 3s ease-in-out infinite;}
+
+/* ---- Toasts glide in (used by the "sent for approval" confirmation) ---- */
+.toast{animation:toastIn .35s cubic-bezier(.2,1.2,.4,1) both;}
+@keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(.95);}to{opacity:1;transform:none;}}
+
+@media (prefers-reduced-motion:reduce){
+  .lock-status-chip,#clientTimeSheet .modal-card,#clientTimeSheet #ctsSend,.toast,.approval-card{animation:none !important;}
+  .approval-card:hover{transform:none;}
+}

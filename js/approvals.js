@@ -27,7 +27,9 @@ window.renderApprovals = function () {
       const submitted = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
       const pd = r.proposed_data || {};
       const action = r.proposed_action || 'unlock';
-      const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑' : action === 'edit' ? '✏️' : action === 'cancel_class' ? '🚫' : '🔓';
+      const icon = action === 'add' ? '➕' : action === 'delete' ? '🗑' : action === 'edit' ? '✏️' : action === 'cancel_class' ? '🚫' : action === 'change_time' ? '🕐' : '🔓';
+      const curT = r.current_time ? formatClassTime12(r.current_time) : null;
+      const newT = (pd.class_time && typeof formatClassTime12 === 'function') ? formatClassTime12(pd.class_time) : (pd.class_time || '—');
       const title = action === 'add'
         ? `Add exercise “${escapeHtml(pd.exercise_name || '?')}”`
         : action === 'delete'
@@ -36,7 +38,9 @@ window.renderApprovals = function () {
             ? `Change ${Object.keys(pd).map(k => `<strong>${escapeHtml(k)}</strong> → <em>${escapeHtml(String(pd[k] ?? '—'))}</em>`).join(', ')}`
             : action === 'cancel_class'
               ? 'Cancel this class — approving removes it from the client\'s schedule &amp; billing'
-              : 'Unlock day for editing';
+              : action === 'change_time'
+                ? `🕐 Time change request: <strong>${escapeHtml(curT || 'no time set')}</strong> → <em>⏰ ${escapeHtml(newT)}</em> — approving makes the new time official`
+                : 'Unlock day for editing';
       html += `<div class="approval-card">
         <div class="approval-card-header"><div style="min-width:0;">
           <div class="approval-card-title">${icon} Workout Edit — ${escapeHtml(clientName)}</div>
@@ -347,7 +351,7 @@ window.decideWorkoutEditRequest = async function (id, clientId, dateStr, decisio
         : action === 'unlock'
           ? `Unlock the workout log for ${dateStr} so the client can edit it?`
           : action === 'change_time'
-            ? `Approve the client's proposed time ⏰ ${(req.proposed_data || {}).class_time || '—'} for ${dateStr}? It becomes the official class time immediately.`
+            ? `Approve the client's proposed time ⏰ ${(() => { const t = (req.proposed_data || {}).class_time; return t && typeof formatClassTime12 === 'function' ? formatClassTime12(t) : (t || '—'); })()} for ${dateStr}? It becomes the official class time immediately.`
             : `Apply the client's proposed change (${action}) to the official log for ${dateStr}?`)
       : (action === 'change_time'
         ? `Decline the client's proposed new time for ${dateStr}? The schedule keeps the current time.`
