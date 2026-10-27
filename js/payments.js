@@ -1135,7 +1135,25 @@
     // 📑 The panel now lives inside the admin workspace tab bar
     // ("💳 Incoming Payments" next to Home / Clients / Calculators) instead
     // of floating at the side of the screen as a fixed bubble.
-    const wsVis = document.getElementById('adminWorkspacePayments');
+    // 🐛 FIX (tab was EMPTY): an old client-portal build REMOVED the whole
+    // #adminWorkspacePayments div from the DOM; every later render then
+    // created a detached host appended straight to <body>, so the 💳 tab
+    // pointed at nothing and showed no requests, no approve buttons and no
+    // settings. Now the workspace + host are re-created inside the admin
+    // dashboard whenever they are missing, and the host is ALWAYS parented
+    // into the workspace — never left floating on <body>.
+    let wsVis = document.getElementById('adminWorkspacePayments');
+    if (!wsVis) {
+      const ad = document.getElementById('adminDashboard');
+      if (!ad) return null;
+      wsVis = document.createElement('div');
+      wsVis.id = 'adminWorkspacePayments';
+      wsVis.className = 'admin-workspace hidden';
+      const tabsBar = ad.querySelector('.admin-workspace-tabs') ||
+        document.getElementById('adminWorkspaceHome');
+      if (tabsBar && tabsBar.parentNode === ad) ad.insertBefore(wsVis, tabsBar.nextSibling);
+      else ad.appendChild(wsVis);
+    }
     let host = document.getElementById('adminPaymentPanelHost');
     if (!host) {
       host = document.createElement('div');
@@ -1147,13 +1165,15 @@
     // either leaked into the other admin tabs or stayed stuck when the tab
     // collapsed — and cards looked "not expandable". Visibility is now
     // owned exclusively by js/workspace.js showAdminWorkspaceTab().
-    if (host.parentNode !== wsVis) {
-      if (wsVis) wsVis.appendChild(host);
-      else document.body.appendChild(host);
-    }
+    // Always (re-)parent the host INTO the workspace — never <body>.
+    wsVis.appendChild(host);
     const tabBtn = document.getElementById('adminTabPaymentsBtn');
     if (tabBtn) tabBtn.classList.remove('hidden');
     host.style.removeProperty('display');
+    // 🩹 If the 💳 tab is the ACTIVE one right now, reveal the workspace
+    // immediately. Otherwise it stays hidden until the trainer clicks the
+    // tab (workspace.js owns the accordion open/collapse).
+    if (window.__activeAdminTab === 'payments') wsVis.classList.remove('hidden');
     return host;
   }
 
@@ -1227,20 +1247,23 @@
     // DOM entirely (not just hidden), so clients can never see or reach it.
     if (!show || !isAdminSession()) { removeAdminPaymentPanel(); return; }
     const panel = ensureAdminPaymentPanel();   // host div inside the 💳 tab workspace
+    if (!panel) return;                         // admin dashboard not in the DOM yet
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
     const attr = (s) => esc(s).replace(/'/g, '&#39;');
     const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
     const cfg = window.getPaymentProviderConfig();
-    const pending = (APP_STATE.clientPayments || [])
-      .concat(readLocalPayments())
-      .filter(p => String(p.status) === 'pending');
-    // Deduplicate declarations (same client+invoice+timestamp)
-    const seenKeys = {};
-    const rows = pending.filter(p => {
-      const k = `${p.client_id}|${p.invoice_key}|${p.created_at || ''}`;
-      if (seenKeys[k]) return false; seenKeys[k] = 1; return true;
-    }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    // 🐛 FIX ("nothing is coming"): dedupe by a key that matches how rows
+    // are actually stored — reference/note live in `reference` as
+    // "REF | note", so the old key based on p.note never matched and every
+    // declaration rendered TWICE (or was dropped inconsistently).
+    const payKey = (p) => `${String(p.client_id)}|${p.invoice_key}|${String(p.status)}|${Math.floor(new Date(p.created_at || 0).getTime() / 1000)}`;
+    const seenPay = new Set();
+    const allRows = [];
+    const addRow = (p) => { if (!p || String(p.status) !== 'pending') return; const k = payKey(p); if (seenPay.has(k)) return; seenPay.add(k); allRows.push(p); };
+    (APP_STATE.clientPayments || []).forEach(addRow);
+    readLocalPayments().forEach(addRow);
+    const rows = allRows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
     // ☁️ Cloud not reachable? Say so right on the panel instead of silently
     // showing an empty list ("nothing is coming").
@@ -1312,7 +1335,7 @@
     // after approve/reject), so freshly rendered cards keep their state.
     if (!window.__tasPayExpanded) window.__tasPayExpanded = new Set();
     const expanded = window.__tasPayExpanded;
-    const rowKeyOf = (p, i) => String(p.id || `${p.client_id}|${p.invoice_key}|${p.created_at || ''}` || ('idx-' + i));
+    const rowKeyOf = (p, i) => String(p.id || payKey(p) || ('idx-' + i));
 
     // 🖊 EDIT state: which declaration key is currently in edit mode.
     if (!window.__tasPayEditing) window.__tasPayEditing = null;
