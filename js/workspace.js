@@ -45,14 +45,23 @@
       void payHost.offsetHeight;
       payHost.style.display = tab === 'payments' ? 'block' : 'none';
     }
-    if (tab === 'payments' && typeof window.renderAdminPaymentPanel === 'function') {
-      try {
-        window.renderAdminPaymentPanel();
-        // Re-assert visibility AFTER the render: renderAdminPaymentPanel
-        // re-checks workspace classes itself; this guarantees the host is
-        // never left display:none by a stale value from an earlier render.
-        if (payHost) payHost.style.display = 'block';
-      } catch (e) {}
+    if (tab === 'payments') {
+      // 🐛 FIX ("nothing is coming"): pull the newest declarations from the
+      // cloud every time the 💳 tab is opened — pending approvals appear
+      // without a page reload. Also un-hide the tab button itself in case a
+      // stale client-side render hid it (admin session already confirmed by
+      // the caller opening this admin-only workspace).
+      const payBtn = $('adminTabPaymentsBtn');
+      if (payBtn) payBtn.classList.remove('hidden');
+      if (typeof window.refreshIncomingPayments === 'function') {
+        try { window.refreshIncomingPayments(); } catch (e) {}
+      } else if (typeof window.renderAdminPaymentPanel === 'function') {
+        try { window.renderAdminPaymentPanel(); } catch (e) {}
+      }
+      // Re-assert visibility AFTER the (sync part of the) render: the async
+      // cloud fetch re-renders on completion; this guarantees the host is
+      // never left display:none by a stale value from an earlier render.
+      if (payHost) payHost.style.display = 'block';
     }
     document.querySelectorAll('.tab-btn[data-atab2]').forEach(b =>
       b.classList.toggle('active', b.dataset.atab2 === tab));

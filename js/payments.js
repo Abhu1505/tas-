@@ -1187,6 +1187,7 @@
     const panel = ensureAdminPaymentPanel();   // host div inside the 💳 tab workspace
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const attr = (s) => esc(s).replace(/'/g, '&#39;');
     const nameOf = (cid) => { try { const cl = getClientSafe(cid); return cl ? (cl.name || cl.id) : String(cid); } catch (e) { return String(cid); } };
     const cfg = window.getPaymentProviderConfig();
     const pending = (APP_STATE.clientPayments || [])
@@ -1271,23 +1272,32 @@
     const expanded = window.__tasPayExpanded;
     const rowKeyOf = (p, i) => String(p.id || `${p.client_id}|${p.invoice_key}|${p.created_at || ''}` || ('idx-' + i));
 
+    // 🖊 EDIT state: which declaration key is currently in edit mode.
+    if (!window.__tasPayEditing) window.__tasPayEditing = null;
+    const editingKey = window.__tasPayEditing;
+
     const list = panel.querySelector('#adminPendingList');
     list.innerHTML = rows.length
       ? rows.map((p, i) => {
         const rk = rowKeyOf(p, i);
-        const isOpen = expanded.has(rk);
+        const isOpen = expanded.has(rk) || editingKey === rk;
+        const isEditing = editingKey === rk;
         const months = String(p.invoice_key || '').split('+').map(monthLabel).join(' + ');
         const refShown = paymentReference(p) || '—';
         const noteShown = paymentNote(p) || '—';
-        return `
-        <div class="tas-pay-card${isOpen ? ' open' : ''}" data-pay-key="${esc(rk)}">
-          <div class="tas-pay-head" role="button" tabindex="0" aria-expanded="${isOpen}" data-pay-toggle="${esc(rk)}">
-            <span class="tas-pay-chev" aria-hidden="true">▶</span>
-            <strong>${esc(nameOf(p.client_id))}</strong>
-            <span class="tas-pay-amount">${esc(fmtMoney(p.amount_due))}</span>
-          </div>
-          <div class="tas-pay-meta">${esc(months)}${String(p.invoice_key || '').includes('+') ? ' (+ carried months)' : ''} · ${esc(methodLabel(p.method))} · ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '')}</div>
-          <div class="tas-pay-detail${isOpen ? ' open' : ''}">
+        const detailInner = isEditing ? `
+            <input class="input tas-edit-field" data-edit-field="amount" inputmode="decimal" placeholder="Amount" value="${attr(p.amount_due != null ? p.amount_due : '')}" />
+            <select class="input tas-edit-field" data-edit-field="method">
+              <option value="bank_transfer"${String(p.method) === 'bank_transfer' ? ' selected' : ''}>🏦 Bank Transfer</option>
+              <option value="paypal"${String(p.method) === 'paypal' ? ' selected' : ''}>🅿️ PayPal</option>
+              <option value="cash_or_transfer"${String(p.method) === 'cash_or_transfer' ? ' selected' : ''}>💵 Cash / Transfer</option>
+            </select>
+            <input class="input tas-edit-field" data-edit-field="reference" placeholder="Reference / UTR" value="${attr(paymentReference(p))}" />
+            <input class="input tas-edit-field" data-edit-field="note" placeholder="Note" value="${attr(paymentNote(p))}" />
+            <div style="display:flex;gap:.4rem;margin-top:.3rem;flex-wrap:wrap;">
+              <button class="btn-secondary btn-small" data-edit-cancel="1" type="button" style="width:auto;">✖ Cancel</button>
+              <button class="btn-primary btn-small" data-save-pay="${attr(rk)}" data-pay-row="${attr(rk)}" type="button" style="width:auto;">💾 Save changes</button>
+            </div>` : `
             <div><b>Client:</b> ${esc(nameOf(p.client_id))} <span style="opacity:.6">(id: ${esc(p.client_id)})</span></div>
             <div><b>Billing month(s):</b> ${esc(months)}</div>
             <div><b>Amount declared:</b> ${esc(fmtMoney(p.amount_due))}</div>
@@ -1296,13 +1306,42 @@
             <div><b>Note from client:</b> ${esc(noteShown)}</div>
             <div><b>Declared at:</b> ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '—')}</div>
             <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;">
-              <button class="btn-secondary btn-small" data-reject-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
-              <button class="btn-primary btn-small" data-approve-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">✅ Money received</button>
-            </div>
+              <button class="btn-secondary btn-small" data-reject-pay="${attr(p.id || '')}" data-lc-client="${attr(p.client_id)}" data-lc-key="${attr(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
+              <button class="btn-primary btn-small" data-approve-pay="${attr(p.id || '')}" data-lc-client="${attr(p.client_id)}" data-lc-key="${attr(p.invoice_key)}" data-amount="${attr(p.amount_due)}" type="button" style="width:auto;">✅ Money received</button>
+              <button class="btn-secondary btn-small" data-edit-pay="${attr(rk)}" type="button" style="width:auto;" title="Edit amount, method, reference or note before approving">🖊 Edit details</button>
+            </div>`;
+        return `
+        <div class="tas-pay-card${isOpen ? ' open' : ''}${isEditing ? ' editing' : ''}" data-pay-key="${attr(rk)}">
+          <div class="tas-pay-head" role="button" tabindex="0" aria-expanded="${isOpen}" data-pay-toggle="${attr(rk)}">
+            <span class="tas-pay-chev" aria-hidden="true">▶</span>
+            <strong>${esc(nameOf(p.client_id))}</strong>
+            <span class="tas-pay-amount">${esc(fmtMoney(p.amount_due))}</span>
+          </div>
+          <div class="tas-pay-meta">${esc(months)}${String(p.invoice_key || '').includes('+') ? ' (+ carried months)' : ''} · ${esc(methodLabel(p.method))} · ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '')}</div>
+          <div class="tas-pay-detail${isOpen ? ' open' : ''}">
+            ${detailInner}
           </div>
         </div>`;
       }).join('')
       : `<div style="opacity:.7;">✅ No transfers awaiting verification. New client declarations appear here automatically — tap 🔄 Refresh to pull the latest.</div>`;
+
+    // 🖊 Helper: find the underlying row object from its display key. The
+    // rows array is rebuilt on every render, so this lookup always reads
+    // the CURRENTLY displayed row objects (same references the cards use).
+    const rowByKey = (rk) => {
+      rk = String(rk == null ? '' : rk);
+      return rows.find((p, i) => rowKeyOf(p, i) === rk) ||
+             rows.find(p => String(p.id || '') === rk) || null;
+    };
+    // 💾 Pending edit saves that couldn't be applied in a previous render
+    // pass — re-applied here against the fresh rows before painting.
+    if (window.__tasPayPendingSaves && window.__tasPayPendingSaves.length) {
+      window.__tasPayPendingSaves.forEach(s => {
+        const p = rowByKey(s.key);
+        if (p) { p.amount_due = s.amount; p.method = s.method; p.reference = s.reference; p.note = s.note; }
+      });
+      window.__tasPayPendingSaves = [];
+    }
 
     // Delegated expand/collapse for the payment cards. Bound ONCE on the
     // persistent host element (#adminPaymentPanelHost) — NOT on the panel
@@ -1317,7 +1356,7 @@
         try {
           const head = ev.target && ev.target.closest ? ev.target.closest('[data-pay-toggle]') : null;
           if (!head) return;
-          if (ev.target.closest('[data-approve-pay],[data-reject-pay],#apSaveBank')) return;
+          if (ev.target.closest('[data-approve-pay],[data-reject-pay],[data-edit-pay],[data-save-pay],[data-edit-cancel],#apSaveBank')) return;
           const key = head.getAttribute('data-pay-toggle');
           const card = head.closest('.tas-pay-card');
           const detail = card && card.querySelector('.tas-pay-detail');
@@ -1343,8 +1382,93 @@
     panel.onclick = async (ev) => {
       const ap = ev.target.closest('[data-approve-pay]');
       const rj = ev.target.closest('[data-reject-pay]');
-      if (ap) { await settleTransfer(ap.dataset.approvePay, ap.dataset.lcClient, ap.dataset.lcKey, 'paid', Number((ap.closest('div').querySelector('span') || {}).textContent) || 0); }
+      const ed = ev.target.closest('[data-edit-pay]');
+      const sv = ev.target.closest('[data-save-pay]');
+      const cx = ev.target.closest('[data-edit-cancel]');
+      if (ap) {
+        // 🐛 FIX: the old amount lookup grabbed a random sibling <span> and
+        // silently stored 0 when it missed — use the data-amount written at
+        // render time, falling back to the row itself.
+        const amt = Number(ap.dataset.amount) || (rowByKey(rowKeyOf({ id: ap.dataset.approvePay }, -1)) || {}).amount_due || 0;
+        await settleTransfer(ap.dataset.approvePay, ap.dataset.lcClient, ap.dataset.lcKey, 'paid', amt);
+      }
       else if (rj) { await settleTransfer(rj.dataset.rejectPay, rj.dataset.lcClient, rj.dataset.lcKey, 'rejected'); }
+      else if (ed) {
+        window.__tasPayEditing = ed.dataset.editPay;
+        expanded.add(ed.dataset.editPay);
+        window.renderAdminPaymentPanel();
+      }
+      else if (cx) {
+        window.__tasPayEditing = null;
+        window.renderAdminPaymentPanel();
+      }
+      else if (sv) {
+        try {
+          const rk = sv.dataset.savePay;
+          const cardEl = sv.closest('.tas-pay-card');
+          const p = rowByKey(rk);
+          if (!p || !cardEl) { toast('⚠️ Row not found — tap 🔄 Refresh and try again.', 'warning'); return; }
+          const g = (f) => { const el = cardEl.querySelector(`[data-edit-field="${f}"]`); return el ? String(el.value).trim() : ''; };
+          const newAmount = parseFloat(g('amount').replace(/[^0-9.\-]/g, ''));
+          const newMethod = g('method') || p.method;
+          const newRef = g('reference');
+          const newNote = g('note');
+          if (!(newAmount > 0)) { toast('⚠️ Enter a valid amount greater than 0.', 'warning'); return; }
+          const mergedRef = [newRef, newNote].filter(Boolean).join(' | ');
+          // 1 · Update the in-memory copy immediately (instant UI feedback).
+          p.amount_due = newAmount; p.method = newMethod;
+          p.reference = mergedRef; p.note = newNote;
+          // Also queue the change so it is re-applied against freshly
+          // rebuilt rows on the next render pass (a concurrent cloud
+          // refresh could otherwise paint the old values once more).
+          window.__tasPayPendingSaves = window.__tasPayPendingSaves || [];
+          window.__tasPayPendingSaves.push({ key: rk, id: p.id || null, amount: newAmount, method: newMethod, reference: mergedRef, note: newNote });
+          // 2 · Update the local mirror too (same natural key).
+          try {
+            const loc = readLocalPayments();
+            let touched = false;
+            loc.forEach(x => {
+              if (String(x.client_id) === String(p.client_id) && x.invoice_key === p.invoice_key &&
+                  String(x.status) === 'pending' && (!p.id || String(x.id || '') === String(p.id || ''))) {
+                x.amount_due = newAmount; x.method = newMethod; x.reference = mergedRef; x.note = newNote; touched = true;
+              }
+            });
+            if (touched) writeLocalPayments(loc);
+          } catch (e) {}
+          // Mirror the edit onto every in-memory row with the same id/key.
+          (APP_STATE.clientPayments || []).forEach(x => {
+            if ((p.id && String(x.id || '') === String(p.id)) ||
+                (!p.id && String(x.client_id) === String(p.client_id) && x.invoice_key === p.invoice_key && String(x.status) === 'pending')) {
+              x.amount_due = newAmount; x.method = newMethod; x.reference = mergedRef; x.note = newNote;
+            }
+          });
+          // 3 · Push to the cloud when the row has an id (or look it up).
+          const sb = APP_STATE.supabaseClient;
+          let cloudDone = false;
+          if (sb) {
+            const payload = { amount_due: newAmount, method: newMethod, reference: mergedRef };
+            try {
+              let targetId = p.id;
+              if (!targetId) {
+                const { data: found } = await sb.from('client_payments')
+                  .select('id').eq('client_id', String(p.client_id)).eq('invoice_key', p.invoice_key)
+                  .eq('status', 'pending').order('created_at', { ascending: false }).limit(1);
+                if (found && found.length) targetId = found[0].id;
+              }
+              if (targetId) {
+                const { error } = await sb.from('client_payments').update(payload).eq('id', targetId);
+                if (!error) { cloudDone = true; p.id = targetId; try { window.__tasPayPendingSaves = []; } catch (e2) {} }
+              }
+            } catch (e) { /* offline — local edits still apply */ }
+          }
+          window.__tasPayEditing = null;
+          toast(cloudDone ? '💾 Payment details updated and synced to the cloud.'
+                          : '💾 Payment details updated on this device — will sync when the connection returns.',
+                cloudDone ? 'success' : 'warning', 5000);
+          window.renderAdminPaymentPanel();
+          renderAll();
+        } catch (e) { console.error('save payment edit:', e); toast('❌ Could not save the changes: ' + e.message, 'error'); }
+      }
       else if (ev.target.closest('#apSaveBank')) {
         const ac = APP_STATE.adminConfig || (APP_STATE.adminConfig = {});
         ac.bank_name = $id('apBankName').value.trim();
