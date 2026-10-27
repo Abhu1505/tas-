@@ -38,9 +38,21 @@
     // 💳 The Incoming Payments panel lives inside the payments workspace;
     // show/hide its content with the tab (js/payments.js re-renders it).
     const payHost = $('adminPaymentPanelHost');
-    if (payHost) payHost.style.display = tab === 'payments' ? 'block' : 'none';
+    if (payHost) {
+      // Force reflow so the display change always applies even if a
+      // previous inline style / animation frame raced with this write.
+      payHost.style.display = '';
+      void payHost.offsetHeight;
+      payHost.style.display = tab === 'payments' ? 'block' : 'none';
+    }
     if (tab === 'payments' && typeof window.renderAdminPaymentPanel === 'function') {
-      try { window.renderAdminPaymentPanel(); } catch (e) {}
+      try {
+        window.renderAdminPaymentPanel();
+        // Re-assert visibility AFTER the render: renderAdminPaymentPanel
+        // re-checks workspace classes itself; this guarantees the host is
+        // never left display:none by a stale value from an earlier render.
+        if (payHost) payHost.style.display = 'block';
+      } catch (e) {}
     }
     document.querySelectorAll('.tab-btn[data-atab2]').forEach(b =>
       b.classList.toggle('active', b.dataset.atab2 === tab));

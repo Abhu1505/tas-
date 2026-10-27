@@ -96,7 +96,8 @@
       panelFor: function (v) {
         return v === 'home' ? 'adminWorkspaceHome'
              : v === 'clients' ? 'adminWorkspaceClients'
-             : v === 'calculators' ? 'adminWorkspaceCalculators' : null;
+             : v === 'calculators' ? 'adminWorkspaceCalculators'
+             : v === 'payments' ? 'adminWorkspacePayments' : null;
       } },
     { sel: '.tab-btn[data-tab]',       prefix: 'tab-',       key: 'tab' },
     { sel: '.tab-btn[data-ctabform]',  prefix: 'ctabform-',  key: 'ctabform' }

@@ -961,7 +961,26 @@
     return host;
   }
 
+  // 🔒 Guard against re-entrant renders: settleTransfer() → toast →
+  // renderAdminPaymentPanel() and the dashboard MutationObserver can both
+  // fire while a render is mid-flight. Without this guard the second call
+  // replaces panel.innerHTML right between "list built" and "handlers
+  // attached", leaving freshly rendered cards with NO click handlers —
+  // which is exactly why rows stopped expanding.
+  let renderInProgress = false;
+  let rerenderQueued = false;
+
   window.renderAdminPaymentPanel = function () {
+    if (renderInProgress) { rerenderQueued = true; return; }
+    renderInProgress = true;
+    try { doRenderAdminPaymentPanel(); }
+    finally {
+      renderInProgress = false;
+      if (rerenderQueued) { rerenderQueued = false; setTimeout(() => window.renderAdminPaymentPanel(), 0); }
+    }
+  };
+
+  function doRenderAdminPaymentPanel() {
     const show = APP_STATE && isAdminSession();
     // Admin-only: in a client portal the panel element is removed from the
     // DOM entirely (not just hidden), so clients can never see or reach it.
@@ -1016,24 +1035,92 @@
       </div>`;
 
     const body = panel.querySelector('#apBody');
-    if (rows.length) body.classList.remove('hidden');
-    panel.querySelector('#apToggleBody').onclick = () => body.classList.toggle('hidden');
+    if (rows.length) { body.classList.remove('hidden'); body.style.display = ''; }
+    panel.querySelector('#apToggleBody').onclick = () => {
+      // Robust toggle: the CSS .hidden rule uses display:none!important, so
+      // flipping BOTH the class and the inline display guarantees the
+      // panel really expands/collapses on every click.
+      const nowHidden = !body.classList.contains('hidden');
+      body.classList.toggle('hidden', nowHidden);
+      body.style.display = nowHidden ? 'none' : 'flex';
+      const tgl = panel.querySelector('#apToggleBody');
+      if (tgl) tgl.setAttribute('aria-expanded', String(!nowHidden));
+    };
+
+    // 🪗 ACCORDION state for the pending cards: clicking a card header
+    // expands its full details, clicking again collapses it. The Set
+    // survives re-renders (panel.onclick re-runs renderAdminPaymentPanel
+    // after approve/reject), so freshly rendered cards keep their state.
+    if (!window.__tasPayExpanded) window.__tasPayExpanded = new Set();
+    const expanded = window.__tasPayExpanded;
+    const rowKeyOf = (p, i) => String(p.id || `${p.client_id}|${p.invoice_key}|${p.created_at || ''}` || ('idx-' + i));
 
     const list = panel.querySelector('#adminPendingList');
     list.innerHTML = rows.length
-      ? rows.map(p => `
-        <div style="border:1px solid var(--line,#ddd);border-radius:12px;padding:.55rem .7rem;">
-          <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;">
+      ? rows.map((p, i) => {
+        const rk = rowKeyOf(p, i);
+        const isOpen = expanded.has(rk);
+        const months = String(p.invoice_key || '').split('+').map(monthLabel).join(' + ');
+        return `
+        <div class="tas-pay-card${isOpen ? ' open' : ''}" data-pay-key="${esc(rk)}">
+          <div class="tas-pay-head" role="button" tabindex="0" aria-expanded="${isOpen}" data-pay-toggle="${esc(rk)}">
+            <span class="tas-pay-chev" aria-hidden="true">▶</span>
             <strong>${esc(nameOf(p.client_id))}</strong>
-            <span>${esc(fmtMoney(p.amount_due))}</span>
+            <span class="tas-pay-amount">${esc(fmtMoney(p.amount_due))}</span>
           </div>
-          <div style="font-size:.78rem;opacity:.7;margin:.15rem 0 .4rem;">${esc(monthLabel(String(p.invoice_key || '').split('+').slice(-1)[0]))}${String(p.invoice_key || '').includes('+') ? ' (+ carried months)' : ''} · ${esc(methodLabel(p.method))} · ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '')}</div>
-          <div style="display:flex;gap:.4rem;">
-            <button class="btn-secondary btn-small" data-reject-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
-            <button class="btn-primary btn-small" data-approve-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">✅ Money received</button>
+          <div class="tas-pay-meta">${esc(months)}${String(p.invoice_key || '').includes('+') ? ' (+ carried months)' : ''} · ${esc(methodLabel(p.method))} · ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '')}</div>
+          <div class="tas-pay-detail${isOpen ? ' open' : ''}">
+            <div><b>Client:</b> ${esc(nameOf(p.client_id))} <span style="opacity:.6">(id: ${esc(p.client_id)})</span></div>
+            <div><b>Billing month(s):</b> ${esc(months)}</div>
+            <div><b>Amount declared:</b> ${esc(fmtMoney(p.amount_due))}</div>
+            <div><b>Method:</b> ${esc(methodLabel(p.method))}</div>
+            <div><b>Reference / UTR:</b> ${esc(p.reference || '—')}</div>
+            <div><b>Note from client:</b> ${esc(p.note || '—')}</div>
+            <div><b>Declared at:</b> ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '—')}</div>
+            <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;">
+              <button class="btn-secondary btn-small" data-reject-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
+              <button class="btn-primary btn-small" data-approve-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">✅ Money received</button>
+            </div>
           </div>
-        </div>`).join('')
+        </div>`;
+      }).join('')
       : `<div style="opacity:.7;">✅ No transfers awaiting verification.</div>`;
+
+    // Delegated expand/collapse for the payment cards. Bound ONCE on the
+    // persistent host element (#adminPaymentPanelHost) — NOT on the panel
+    // div itself, because renderAdminPaymentPanel() replaces that div's
+    // innerHTML on every re-render (approve/reject path), which used to
+    // wipe out any listener attached to it and left freshly rendered
+    // cards dead to clicks ("not getting expanded"). Delegation from the
+    // host survives every re-render. Capture phase so it always fires.
+    if (!panel.__tasPayToggleBound) {
+      panel.__tasPayToggleBound = true;
+      panel.addEventListener('click', (ev) => {
+        try {
+          const head = ev.target && ev.target.closest ? ev.target.closest('[data-pay-toggle]') : null;
+          if (!head) return;
+          if (ev.target.closest('[data-approve-pay],[data-reject-pay],#apSaveBank')) return;
+          const key = head.getAttribute('data-pay-toggle');
+          const card = head.closest('.tas-pay-card');
+          const detail = card && card.querySelector('.tas-pay-detail');
+          const willOpen = !expanded.has(key);
+          if (willOpen) expanded.add(key); else expanded.delete(key);
+          if (card) card.classList.toggle('open', willOpen);
+          if (detail) detail.classList.toggle('open', willOpen);
+          head.setAttribute('aria-expanded', String(willOpen));
+        } catch (e) { /* never break the click chain */ }
+      }, true);
+      // Keyboard access: Enter/Space on a focused card header toggles it.
+      panel.addEventListener('keydown', (ev) => {
+        try {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          const head = ev.target && ev.target.closest ? ev.target.closest('[data-pay-toggle]') : null;
+          if (!head) return;
+          ev.preventDefault();
+          head.click();
+        } catch (e) {}
+      }, true);
+    }
 
     panel.onclick = async (ev) => {
       const ap = ev.target.closest('[data-approve-pay]');

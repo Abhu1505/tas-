@@ -2661,3 +2661,26 @@ button:not(:disabled):active{transform:translateY(0) scale(.98);}
   .lock-status-chip,#clientTimeSheet .modal-card,#clientTimeSheet #ctsSend,.toast,.approval-card{animation:none !important;}
   .approval-card:hover{transform:none;}
 }
+
+/* ---- 💳 Incoming Payments (admin tab) — expandable pending cards ---- */
+.tas-pay-card{border:1px solid var(--line,#ddd);border-radius:12px;padding:.55rem .7rem;
+  transition:border-color .2s var(--ease,cubic-bezier(.22,.9,.3,1)),box-shadow .2s var(--ease,cubic-bezier(.22,.9,.3,1));}
+.tas-pay-card.open{border-color:rgba(232,118,39,.55);box-shadow:0 4px 14px rgba(20,40,60,.10);}
+.tas-pay-head{display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;
+  cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;outline:none;}
+.tas-pay-head:focus-visible{outline:2px solid rgba(232,118,39,.6);outline-offset:2px;border-radius:8px;}
+.tas-pay-chev{display:inline-block;font-size:.7em;opacity:.65;margin-right:.35rem;
+  transition:transform .25s var(--ease,cubic-bezier(.22,.9,.3,1));}
+.tas-pay-card.open .tas-pay-chev{transform:rotate(90deg);}
+.tas-pay-amount{font-weight:600;}
+.tas-pay-meta{font-size:.78rem;opacity:.7;margin:.15rem 0 0;}
+/* Detail section: hidden by default, slides open when the card is clicked.
+   max-height + opacity keep the animation smooth without JS measuring. */
+.tas-pay-detail{display:grid;gap:.22rem;font-size:.82rem;margin-top:0;padding-top:0;
+  max-height:0;opacity:0;overflow:hidden;
+  transition:max-height .3s var(--ease,cubic-bezier(.22,.9,.3,1)),opacity .25s ease,margin-top .3s ease,padding-top .3s ease;}
+.tas-pay-detail.open{max-height:480px;opacity:1;margin-top:.5rem;padding-top:.55rem;
+  border-top:1px dashed var(--line,#ddd);}
+@media (prefers-reduced-motion:reduce){
+  .tas-pay-detail,.tas-pay-chev,.tas-pay-card{transition:none !important;}
+}
