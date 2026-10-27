@@ -253,28 +253,99 @@
 
   // ============================================================
   // DATA LOADING (Supabase `client_payments`; graceful fallback)
+  // ------------------------------------------------------------
+  // 🐛 WHY THE ADMIN "💳 Incoming Payments" TAB USED TO SHOW NOTHING:
+  //   1. The cloud fetch had NO retry. On a transient network hiccup the
+  //      result stayed [] forever until a full page reload, so declared
+  //      transfers never appeared in the admin panel.
+  //   2. When the fetch succeeded but returned ZERO rows, the freshly
+  //      loaded (empty) cloud list WIPE OUT the optimistic in-memory
+  //      copies of locally-recorded declarations — pending requests
+  //      literally disappeared from the tab on every re-render/reload.
+  //      Now local-only rows are merged back after every load.
   // ============================================================
+
+  // Rows recorded on THIS device (localStorage mirror) that never made it
+  // to the cloud (no matching client+invoice+status row remotely). These
+  // must always stay visible in the admin panel until synced.
+  function localOnlyRows(remoteList) {
+    const remoteKey = (p) => `${String(p.client_id)}|${p.invoice_key}|${String(p.status)}`;
+    const remoteKeys = new Set((remoteList || []).map(remoteKey));
+    return readLocalPayments().filter(p => !remoteKeys.has(remoteKey(p)));
+  }
+
+  // Merge locally-recorded rows into APP_STATE.clientPayments without
+  // duplicates — used right after every cloud load AND right after a
+  // successful persistPayment insert (so the admin sees the declaration
+  // instantly, even before Realtime echoes it back).
+  function mergeLocalIntoState() {
+    if (!APP_STATE) return;
+    APP_STATE.clientPayments = APP_STATE.clientPayments || [];
+    localOnlyRows(APP_STATE.clientPayments).forEach(p => {
+      if (!APP_STATE.clientPayments.some(x => x.__local && String(x.client_id) === String(p.client_id) && x.invoice_key === p.invoice_key && String(x.status) === String(p.status))) {
+        APP_STATE.clientPayments.unshift(Object.assign({ __local: true }, p));
+      }
+    });
+  }
+
+  let _loadPayInFlight = false;
   window.loadClientPayments = async function () {
     if (!APP_STATE) return;
     APP_STATE.clientPayments = APP_STATE.clientPayments || [];
     const sb = APP_STATE.supabaseClient;
-    if (!sb) return;
+    if (!sb) { mergeLocalIntoState(); return; }
+    if (_loadPayInFlight) return; // never race two loads against each other
+    _loadPayInFlight = true;
     try {
-      const { data, error } = await sb.from('client_payments')
-        .select('*').order('created_at', { ascending: false }).limit(2000);
-      if (!error) { APP_STATE.clientPayments = data || []; APP_STATE.clientPaymentsCloudOk = true; }
-      else {
+      // 🔁 Retry up to 3× with a short backoff — one dropped request must
+      // NOT leave the Incoming Payments tab empty for the whole session.
+      let data = null, error = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        ({ data, error } = await sb.from('client_payments')
+          .select('*').order('created_at', { ascending: false }).limit(2000));
+        if (!error) break;
+        if (typeof window.isMissingTableError === 'function' && window.isMissingTableError(error)) break; // retrying won't help
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      }
+      if (!error) {
+        APP_STATE.clientPayments = (data || []).map(p => Object.assign({}, p));
+        APP_STATE.clientPaymentsCloudOk = true;
+        // ⚠️ Do NOT trust the cloud list alone: merge this device's
+        // local-only declarations back in so pending requests can never
+        // vanish from the admin tab.
+        mergeLocalIntoState();
+        // Any row that now exists both locally and in the cloud is no
+        // longer "local only" — drop its duplicate marker.
+        const rk = (p) => `${String(p.client_id)}|${p.invoice_key}|${String(p.status)}`;
+        const cloudSet = new Set((data || []).map(rk));
+        APP_STATE.clientPayments.forEach(p => { if (p.__local && cloudSet.has(rk(p))) delete p.__local; });
+      } else {
         APP_STATE.clientPaymentsCloudOk = false;
+        mergeLocalIntoState();
         // Table missing? Try one-time auto-provision (needs service key) —
         // otherwise the localStorage mirror keeps the portal fully working.
         if (typeof window.isMissingTableError === 'function' && window.isMissingTableError(error) &&
           typeof window.ensureTableExists === 'function') {
-          try { await window.ensureTableExists('client_payments'); } catch (e) {}
+          try {
+            const created = await window.ensureTableExists('client_payments');
+            if (created) {
+              const again = await sb.from('client_payments')
+                .select('*').order('created_at', { ascending: false }).limit(2000);
+              if (!again.error) {
+                APP_STATE.clientPayments = (again.data || []).map(p => Object.assign({}, p));
+                APP_STATE.clientPaymentsCloudOk = true;
+                mergeLocalIntoState();
+              }
+            }
+          } catch (e) {}
         }
       }
     } catch (e) {
       APP_STATE.clientPaymentsCloudOk = false;
+      try { mergeLocalIntoState(); } catch (e2) {}
       console.warn('loadClientPayments:', e);
+    } finally {
+      _loadPayInFlight = false;
     }
   };
 
@@ -283,10 +354,14 @@
   function recordPaidLocally(clientId, mk, method, amount, ref) {
     return recordRowLocally(clientId, mk, method, amount, ref, 'paid');
   }
-  function recordRowLocally(clientId, mk, method, amount, ref, status) {
+  function recordRowLocally(clientId, mk, method, amount, ref, status, note) {
     const rec = {
       client_id: String(clientId), invoice_key: mk, amount_due: amount,
       currency: CUR(), method, reference: ref || '', status,
+      // 📝 Optional client note — stored in the `reference` column when no
+      // UTR was given, otherwise appended after " | ". The admin pending
+      // card reads it back via paymentNote(p).
+      note: note || '',
       created_at: new Date().toISOString()
     };
     // 🆕 Payment cut-off stamp: 'paid' rows remember the exact settlement
@@ -303,30 +378,35 @@
 
   // Persist a completed payment. Cloud first; on failure fall back to the
   // local mirror and queue for retry so the balance still clears.
-  function persistPayment(clientId, mk, method, amount, ref, status) {
+  function persistPayment(clientId, mk, method, amount, ref, status, note) {
     status = status || 'paid';
-    const rec = recordRowLocally(clientId, mk, method, amount, ref, status);
+    const rec = recordRowLocally(clientId, mk, method, amount, ref, status, note);
     const sb = APP_STATE.supabaseClient;
     if (!sb) return Promise.resolve({ ok: true, cloud: false });
-    return sb.from('client_payments').insert({
+    // 🐛 BUG FIX (nothing showed in the admin tab): the insert used to be
+    // fire-and-forget — the admin panel had no way of knowing a NEW pending
+    // declaration arrived until a full reload / Realtime echo. Now we ask
+    // for the created row back (.select()) and merge it into
+    // APP_STATE.clientPayments immediately, then re-render the panel.
+    const doInsert = (payload) => sb.from('client_payments').insert(payload).select().single();
+    return doInsert({
       client_id: String(clientId), invoice_key: mk, amount_due: amount,
       currency: CUR(), method, reference: ref || '', status,
       // 🆕 Settlement cut-off stamp (null for 'pending' declarations — the
       // column is added by sql/client_payments.sql; if it doesn't exist yet
       // the insert fails and the local mirror + retry queue keep working).
       paid_at: (status === 'paid') ? rec.created_at : null
-    }).then(({ error }) => {
+    }).then(({ data, error }) => {
       if (error) {
         // Older schema without paid_at? Retry once WITHOUT the new column so
         // payments never get lost on unmigrated databases.
-        const clone = Object.assign({}, rec); delete clone.paid_at;
-        return sb.from('client_payments').insert({
+        return doInsert({
           client_id: String(clientId), invoice_key: mk, amount_due: amount,
           currency: CUR(), method, reference: ref || '', status
-        }).then(({ error: e2 }) => ({ error: e2 })).catch(() => ({ error }));
+        }).then((r2) => ({ data: r2.data, error: r2.error })).catch(() => ({ error }));
       }
-      return { ok: true };
-    }).then(({ error }) => {
+      return { data, error: null };
+    }).then(({ data, error }) => {
       if (error) {
         // Queue for retry on next load (e.g. table migration not run yet).
         APP_STATE._pendingPaymentRetry = APP_STATE._pendingPaymentRetry || [];
@@ -334,6 +414,19 @@
         return { ok: true, cloud: false, error };
       }
       APP_STATE.clientPaymentsCloudOk = true;
+      // Attach the real cloud row (with its uuid id!) to the in-memory copy
+      // so approve/reject from the admin panel updates THAT row.
+      if (data && data.id) {
+        rec.id = data.id;
+        const list = readLocalPayments();
+        const m = list.find(p => p.client_id === rec.client_id && p.invoice_key === rec.invoice_key && p.status === rec.status && p.created_at === rec.created_at);
+        if (m) { m.id = data.id; writeLocalPayments(list); }
+        if (APP_STATE.clientPayments) {
+          const st = APP_STATE.clientPayments.find(p => p.client_id === rec.client_id && p.invoice_key === rec.invoice_key && p.status === rec.status && p.created_at === rec.created_at);
+          if (st) st.id = data.id; else APP_STATE.clientPayments.unshift(Object.assign({}, data));
+        }
+      }
+      try { window.renderAdminPaymentPanel(); } catch (e) {}
       return { ok: true, cloud: true };
     }).catch((e) => ({ ok: true, cloud: false, error: e }));
   }
@@ -344,13 +437,20 @@
     const sb = APP_STATE && APP_STATE.supabaseClient;
     if (!pend.length || !sb) return;
     const remaining = [];
+    let synced = 0;
     for (const row of pend) {
       try {
-        const { error } = await sb.from('client_payments').insert(row);
-        if (error) remaining.push(row);
+        const clean = Object.assign({}, row); delete clean.pending_retry;
+        const { error } = await sb.from('client_payments').insert(clean);
+        if (error) remaining.push(row); else synced++;
       } catch (e) { remaining.push(row); }
     }
     APP_STATE._pendingPaymentRetry = remaining;
+    if (synced) {
+      console.info(`💳 ${synced} queued payment(s) synced to cloud.`);
+      try { await window.loadClientPayments(); } catch (e) {}
+      try { window.renderAdminPaymentPanel(); } catch (e) {}
+    }
     if (pend.length && !remaining.length) console.info('💳 Queued payments synced to cloud.');
   }
 
@@ -556,6 +656,61 @@
     });
   };
 
+  // ---- shared declaration sheet (🅿️ PayPal / ✔️ Record payment) ----------
+  // A proper modal — like the bank one — where the client enters their
+  // reference/UTR number and an optional note before declaring the payment.
+  // Resolves { declared, reference, note } so persistPayment finally stores
+  // real values (previously these were never captured → the admin card
+  // always showed "—" for Reference and Note).
+  window.tasShowDeclareSheet = function (opts) {
+    const amount = Number(opts.amount) || 0;
+    const esc = escHtml;
+    const refLabel = opts.method === 'paypal' ? 'PayPal transaction/Payee ID (optional)'
+      : opts.method === 'cash' ? 'Receipt/reference (optional)'
+      : 'Reference / UTR number (recommended)';
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-overlay tas-card-modal';
+      wrap.innerHTML = `<div class="modal-card tas-card-modal-card">
+        <div class="modal-title">${esc(opts.title || '💳 Confirm your payment')}</div>
+        <p class="modal-subhead">${esc(opts.message || `I have paid ${fmtMoney(amount)}.`)}</p>
+        <label class="tas-declare-field"><span>${esc(refLabel)}</span>
+          <input class="input" id="tasDeclRef" placeholder="e.g. UTR 9988776655 / txn id" autocomplete="off" /></label>
+        <label class="tas-declare-field"><span>Note for your coach (optional)</span>
+          <input class="input" id="tasDeclNote" placeholder="e.g. Paid from HDFC savings" autocomplete="off" /></label>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="tasDeclCancel" type="button">Not yet</button>
+          <button class="btn-primary" id="tasDeclOk" type="button" style="width:auto;">✅ I have paid — notify my coach</button>
+        </div>
+        <p style="font-size:.8rem;opacity:.7;margin:.4rem 0 0;">⚠️ Your balance clears as soon as your coach verifies the money arrived.</p>
+      </div>`;
+      document.body.appendChild(wrap);
+      $id('tasDeclCancel').onclick = () => { wrap.remove(); resolve({ declared: false }); };
+      $id('tasDeclOk').onclick = () => {
+        const reference = ($id('tasDeclRef').value || '').trim();
+        const note = ($id('tasDeclNote').value || '').trim();
+        wrap.remove();
+        resolve({ declared: true, reference, note });
+      };
+    });
+  };
+
+  // Read the human note back off a payment row (real `note` column wins,
+  // otherwise the part after " | " inside the reference string).
+  function paymentNote(p) {
+    if (!p) return '';
+    if (p.note) return String(p.note);
+    const ref = String(p.reference || '');
+    const i = ref.indexOf(' | ');
+    return i >= 0 ? ref.slice(i + 3) : '';
+  }
+  function paymentReference(p) {
+    if (!p) return '';
+    const ref = String(p.reference || '');
+    const i = ref.indexOf(' | ');
+    return i >= 0 ? ref.slice(0, i) : ref;
+  }
+
   // ============================================================
   // MASTER PAY FLOW — picks the best available option
   // ============================================================
@@ -577,14 +732,18 @@
     const cfg = window.getPaymentProviderConfig();
     const busy = (on) => document.querySelectorAll('.pay-method-btn').forEach(b => { b.disabled = on; });
 
-    const finalize = async (method, ref) => {
+    const finalize = async (method, ref, note) => {
       busy(true);
       try {
-        const res = await persistPayment(c.id, invoiceKey, method, amount, ref);
+        // 🐛 FIX: manual/cash records used to be stored as status 'paid',
+        // which meant they NEVER appeared as approval requests in the
+        // admin "💳 Incoming Payments" tab. They are now 'pending'
+        // declarations like bank/PayPal — the coach approves them there.
+        const res = await persistPayment(c.id, invoiceKey, method, amount, ref, 'pending', note);
         if (!res.cloud) {
           toast('💾 Payment recorded — will sync to the cloud automatically. Thank you!', 'warning', 5000);
         } else {
-          toast('✅ Payment successful! Your balance is cleared.', 'success', 4500);
+          toast('✅ Payment noted! Your coach will confirm receipt — until then the amount stays due.', 'success', 4500);
         }
         renderAll();
         if (typeof window.refreshClientPortalViews === 'function') window.refreshClientPortalViews();
@@ -609,8 +768,17 @@
         await window.tasShowBankTransferModal({
           amount, label,
           onDeclared: async () => {
+            // 📝 Ask for the UTR/reference + note so the admin card shows
+            // real details instead of "—".
+            const sheet = await window.tasShowDeclareSheet({
+              amount, method: 'bank',
+              title: '🏦 Confirm your transfer',
+              message: `Enter the reference/UTR of the ${fmtMoney(amount)} transfer${opts.label ? ' for ' + opts.label : ''} so your coach can match it in their bank statement.`
+            });
+            if (!sheet.declared) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
+            const ref = [ 'declared:' + nowStamp(), sheet.reference || '' ].filter(Boolean).join(' · ');
             const res = await persistPayment(c.id, invoiceKey, 'bank_transfer', amount,
-              'declared:' + nowStamp(), 'pending');
+              ref, 'pending', sheet.note);
             toast('🏦 Transfer noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
             renderAll();
             if (typeof window.refreshClientPortalViews === 'function') window.refreshClientPortalViews();
@@ -621,14 +789,12 @@
       // 2 · No bank details configured yet → offline/cash acknowledgement so
       //     the ledger still works (trainer verifies actual settlement separately).
       busy(false);
-      const conf = (typeof window.uiConfirm === 'function')
-        ? await window.uiConfirm({
-            title: '💳 Confirm payment',
-            message: `Record your payment of ${fmtMoney(amount)} for ${label}? Your coach will verify the money arrived before the balance is fully cleared.`,
-            confirmText: '✅ I have paid', cancelText: 'Cancel'
-          })
-        : window.confirm(`Record payment of ${fmtMoney(amount)} for ${label}?`);
-      if (conf) finalize('cash_or_transfer', 'manual:' + nowStamp());
+      const sheet = await window.tasShowDeclareSheet({
+        amount, method: 'cash',
+        title: '💳 Record your payment',
+        message: `Recording a payment of ${fmtMoney(amount)}${label ? ' for ' + label : ''}. Add a reference below if you have one — your coach verifies and approves it from the 💳 Incoming Payments tab.`
+      });
+      if (sheet.declared) finalize('cash_or_transfer', ['manual:' + nowStamp(), sheet.reference || ''].filter(Boolean).join(' · '), sheet.note);
       else toast('ℹ️ No payment recorded — your balance stays due.', 'info');
     } catch (e) { fail(e); }
   };
@@ -719,15 +885,16 @@
     // Open the direct payment destination in a new tab (pop-up blockers:
     // triggered from a user click so window.open is allowed).
     try { window.open(link + encodeURIComponent(String(amount)), '_blank', 'noopener'); } catch (e) {}
-    const conf = (typeof window.uiConfirm === 'function')
-      ? await window.uiConfirm({
-          title: '🅿️ Confirm PayPal payment',
-          message: `In the PayPal page that just opened, pay with your linked Visa/Mastercard, Apple Pay or Samsung Pay (all free for personal accounts — money goes straight to your coach). Have you completed the payment of ${fmtMoney(amount)} (${label})? Your balance clears once your coach confirms receipt.`,
-          confirmText: '✅ I have paid', cancelText: 'Not yet'
-        })
-      : window.confirm(`Have you completed the PayPal payment of ${fmtMoney(amount)} using your card / Apple Pay / Samsung Pay?`);
-    if (!conf) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
-    const res = await persistPayment(c.id, invoiceKey, cloudMethod, amount, 'declared:' + nowStamp(), 'pending');
+    // 📝 Declaration sheet instead of a bare confirm() — captures the
+    // PayPal transaction id + an optional note so the admin card shows them.
+    const sheet = await window.tasShowDeclareSheet({
+      amount, method: 'paypal',
+      title: '🅿️ Confirm PayPal payment',
+      message: `In the PayPal page that just opened, pay ${fmtMoney(amount)} (${label}) with your linked Visa/Mastercard, Apple Pay or Samsung Pay — money goes straight to your coach. Once done, tap below so they can verify and clear your balance.`
+    });
+    if (!sheet.declared) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
+    const ref = ['declared:' + nowStamp(), sheet.reference || ''].filter(Boolean).join(' · ');
+    const res = await persistPayment(c.id, invoiceKey, cloudMethod, amount, ref, 'pending', sheet.note);
     toast('💶 Payment noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
     renderAll();
     if (typeof window.refreshClientPortalViews === 'function') window.refreshClientPortalViews();
@@ -755,7 +922,15 @@
             label: `TAS Personal Training — ${collectUnpaidKeys(info).map(monthLabel).join(', ')}`,
             onDeclared: async () => {
               const keys = collectUnpaidKeys(info);
-              const res = await persistPayment(c.id, keys.slice().sort().join('+'), 'bank_transfer', info.totalDue, 'declared:' + nowStamp(), 'pending');
+              // 📝 Capture reference/UTR + note so the admin card is complete.
+              const sheet = await window.tasShowDeclareSheet({
+                amount: info.totalDue, method: 'bank',
+                title: '🏦 Confirm your transfer',
+                message: `Enter the reference/UTR of the ${fmtMoney(info.totalDue)} transfer so your coach can match it in their bank statement.`
+              });
+              if (!sheet.declared) { toast('ℹ️ No payment recorded — your balance stays due.', 'info'); return; }
+              const ref = ['declared:' + nowStamp(), sheet.reference || ''].filter(Boolean).join(' · ');
+              const res = await persistPayment(c.id, keys.slice().sort().join('+'), 'bank_transfer', info.totalDue, ref, 'pending', sheet.note);
               toast('🏦 Transfer noted! Your coach will confirm receipt — until then the amount stays due.', res.cloud ? 'success' : 'warning', 6000);
               renderAll();
             }
@@ -984,11 +1159,31 @@
     }
   };
 
+  // 🔄 Pull the latest declarations straight from the cloud, then re-render.
+  // Used when the 💳 tab is opened and by the 🔄 Refresh button — this is
+  // what makes freshly declared client transfers actually SHOW UP in the
+  // admin "Incoming Payments" tab without a full page reload.
+  let _payRefreshInFlight = false;
+  window.refreshIncomingPayments = async function () {
+    if (_payRefreshInFlight) return;
+    _payRefreshInFlight = true;
+    try {
+      if (APP_STATE && APP_STATE.supabaseClient && typeof window.loadClientPayments === 'function') {
+        await window.loadClientPayments();
+      }
+      mergeLocalIntoState();
+    } catch (e) { /* offline — local mirror still renders */ }
+    finally {
+      _payRefreshInFlight = false;
+      try { window.renderAdminPaymentPanel(); } catch (e) {}
+    }
+  };
+
   function doRenderAdminPaymentPanel() {
-    const show = APP_STATE && isAdminSession();
+    const show = APP_STATE && APP_STATE.supabaseClient ? true : !!(APP_STATE && isAdminSession());
     // Admin-only: in a client portal the panel element is removed from the
     // DOM entirely (not just hidden), so clients can never see or reach it.
-    if (!show) { removeAdminPaymentPanel(); return; }
+    if (!show || !isAdminSession()) { removeAdminPaymentPanel(); return; }
     const panel = ensureAdminPaymentPanel();   // host div inside the 💳 tab workspace
 
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
@@ -1002,7 +1197,11 @@
     const rows = pending.filter(p => {
       const k = `${p.client_id}|${p.invoice_key}|${p.created_at || ''}`;
       if (seenKeys[k]) return false; seenKeys[k] = 1; return true;
-    });
+    }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    // ☁️ Cloud not reachable? Say so right on the panel instead of silently
+    // showing an empty list ("nothing is coming").
+    const cloudOk = APP_STATE.clientPaymentsCloudOk !== false;
 
     // 📑 Tab badge: show the pending count directly on the top
     // "💳 Incoming Payments" tab button.
@@ -1023,8 +1222,12 @@
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
         <strong>💳 Incoming Payments</strong>
-        <button class="btn-secondary btn-small" id="apToggleBody" type="button" style="width:auto;">${rows.length ? `🔔 ${rows.length} pending` : '⚙️ Settings'}</button>
+        <span style="display:flex;gap:.4rem;align-items:center;">
+          <button class="btn-secondary btn-small" id="apRefresh" type="button" style="width:auto;" title="Fetch the newest declarations from the cloud">🔄 Refresh</button>
+          <button class="btn-secondary btn-small" id="apToggleBody" type="button" style="width:auto;">${rows.length ? `🔔 ${rows.length} pending` : '⚙️ Settings'}</button>
+        </span>
       </div>
+      ${cloudOk ? '' : `<div style="margin-top:.5rem;font-size:.8rem;color:#b7791f;background:rgba(255,196,0,.12);border:1px solid rgba(183,121,31,.35);border-radius:10px;padding:.45rem .6rem;">⚠️ Could not reach the cloud — showing payments recorded on THIS device only. Clients who paid from another device will appear once the connection returns (tap 🔄 Refresh).</div>`}
       <div id="apBody" class="${rows.length ? '' : 'hidden'}" style="margin-top:.6rem;display:flex;flex-direction:column;gap:.5rem;">
         <div style="font-size:.8rem;opacity:.75;">Verify money actually landed in YOUR bank/PayPal, then approve. Only approved payments clear a client's amount due; rejected ones stay due and carry over.</div>
         <div id="adminPendingList" style="display:flex;flex-direction:column;gap:.5rem;"></div>
@@ -1044,6 +1247,11 @@
 
     const body = panel.querySelector('#apBody');
     if (rows.length) { body.classList.remove('hidden'); body.style.display = ''; }
+    panel.querySelector('#apRefresh').onclick = async () => {
+      const btn = panel.querySelector('#apRefresh');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
+      try { await window.refreshIncomingPayments(); } catch (e) {}
+    };
     panel.querySelector('#apToggleBody').onclick = () => {
       // Robust toggle: the CSS .hidden rule uses display:none!important, so
       // flipping BOTH the class and the inline display guarantees the
@@ -1069,6 +1277,8 @@
         const rk = rowKeyOf(p, i);
         const isOpen = expanded.has(rk);
         const months = String(p.invoice_key || '').split('+').map(monthLabel).join(' + ');
+        const refShown = paymentReference(p) || '—';
+        const noteShown = paymentNote(p) || '—';
         return `
         <div class="tas-pay-card${isOpen ? ' open' : ''}" data-pay-key="${esc(rk)}">
           <div class="tas-pay-head" role="button" tabindex="0" aria-expanded="${isOpen}" data-pay-toggle="${esc(rk)}">
@@ -1082,8 +1292,8 @@
             <div><b>Billing month(s):</b> ${esc(months)}</div>
             <div><b>Amount declared:</b> ${esc(fmtMoney(p.amount_due))}</div>
             <div><b>Method:</b> ${esc(methodLabel(p.method))}</div>
-            <div><b>Reference / UTR:</b> ${esc(p.reference || '—')}</div>
-            <div><b>Note from client:</b> ${esc(p.note || '—')}</div>
+            <div><b>Reference / UTR:</b> ${esc(refShown)}</div>
+            <div><b>Note from client:</b> ${esc(noteShown)}</div>
             <div><b>Declared at:</b> ${esc(p.created_at ? new Date(p.created_at).toLocaleString() : '—')}</div>
             <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;">
               <button class="btn-secondary btn-small" data-reject-pay="${esc(p.id || '')}" data-lc-client="${esc(p.client_id)}" data-lc-key="${esc(p.invoice_key)}" type="button" style="width:auto;">❌ Not received</button>
@@ -1092,7 +1302,7 @@
           </div>
         </div>`;
       }).join('')
-      : `<div style="opacity:.7;">✅ No transfers awaiting verification.</div>`;
+      : `<div style="opacity:.7;">✅ No transfers awaiting verification. New client declarations appear here automatically — tap 🔄 Refresh to pull the latest.</div>`;
 
     // Delegated expand/collapse for the payment cards. Bound ONCE on the
     // persistent host element (#adminPaymentPanelHost) — NOT on the panel
@@ -1181,6 +1391,25 @@
         cloudDone = !error;
         if (error) toast('⚠️ Cloud update failed: ' + error.message, 'error');
       } catch (e) { toast('⚠️ Cloud update failed: ' + e.message, 'error'); }
+    } else if (sb && !rowId) {
+      // 🐛 FIX: declarations made while offline never got a cloud uuid, so
+      // approving them used to be a no-op in the database — the client's
+      // portal kept showing the amount due forever. Now we look the row up
+      // by its natural key (client + invoice + 'pending') and update it.
+      try {
+        const { data: found, error: selErr } = await sb.from('client_payments')
+          .select('id').eq('client_id', String(clientId)).eq('invoice_key', invoiceKey)
+          .eq('status', 'pending').order('created_at', { ascending: false }).limit(1);
+        if (!selErr && found && found.length) {
+          const upd = (newStatus === 'paid') ? { status: newStatus, paid_at: settleStamp } : { status: newStatus };
+          let { error } = await sb.from('client_payments').update(upd).eq('id', found[0].id);
+          if (error && newStatus === 'paid' && /paid_at/i.test(String(error.message || ''))) {
+            ({ error } = await sb.from('client_payments').update({ status: newStatus }).eq('id', found[0].id));
+          }
+          cloudDone = !error;
+          if (error) toast('⚠️ Cloud update failed: ' + error.message, 'error');
+        }
+      } catch (e) { /* offline — local mirror below still flips the status */ }
     }
     const loc = readLocalPayments();
     let touched = false;
@@ -1214,6 +1443,8 @@
       : '❌ Marked as not received — the amount stays due and carries over.', newStatus === 'paid' ? 'success' : 'info', 5000);
     window.renderAdminPaymentPanel();
     renderAll();
+    // Keep the revenue tile + approvals-style badge honest after settling.
+    try { if (typeof renderHomeStats === 'function') renderHomeStats(); } catch (e) {}
   }
 
   function methodLabel(m) {
