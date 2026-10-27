@@ -289,12 +289,19 @@
   }
 
   let _loadPayInFlight = false;
+  let _loadPayQueuedBehind = false;
   window.loadClientPayments = async function () {
     if (!APP_STATE) return;
     APP_STATE.clientPayments = APP_STATE.clientPayments || [];
     const sb = APP_STATE.supabaseClient;
     if (!sb) { mergeLocalIntoState(); return; }
-    if (_loadPayInFlight) return; // never race two loads against each other
+    if (_loadPayInFlight) {
+      // Never RACE two loads — but always honour the latest caller: when an
+      // in-flight load finishes it runs one fresh follow-up pass so opening
+      // the 💳 tab mid-fetch still pulls the newest declarations.
+      _loadPayQueuedBehind = true;
+      return;
+    }
     _loadPayInFlight = true;
     try {
       // 🔁 Retry up to 3× with a short backoff — one dropped request must
@@ -346,6 +353,12 @@
       console.warn('loadClientPayments:', e);
     } finally {
       _loadPayInFlight = false;
+      if (_loadPayQueuedBehind) {
+        _loadPayQueuedBehind = false;
+        // A refresh was requested while this load was mid-flight — run one
+        // fresh pass so the newest declarations are never missed.
+        window.loadClientPayments().catch(() => {});
+      }
     }
   };
 
@@ -373,6 +386,10 @@
         APP_STATE.clientPayments.unshift(rec);
       }
     }
+    // 💳 A brand-new declaration just landed → repaint the admin Incoming
+    // Payments tab immediately (same-device flow, and the trainer's own
+    // manual/cash records go through this path too).
+    try { window.renderAdminPaymentPanel(); } catch (e) {}
     return rec;
   }
 
@@ -1157,7 +1174,32 @@
       renderInProgress = false;
       if (rerenderQueued) { rerenderQueued = false; setTimeout(() => window.renderAdminPaymentPanel(), 0); }
     }
+    // 🩹 SELF-HEAL: the 💳 tab button / workspace can be re-injected by
+    // other code paths AFTER this render ran (login, dashboard switch),
+    // leaving them stuck with the stale 'hidden' class from
+    // removeAdminPaymentPanel() — which looks exactly like "the tab shows
+    // nothing". Re-assert their visibility a moment later for admin
+    // sessions whenever they are still hidden.
+    setTimeout(healPaymentsTabVisibility, 400);
   };
+
+  function healPaymentsTabVisibility() {
+    try {
+      if (!isAdminSession()) return;                       // clients stay clean
+      const ws = document.getElementById('adminWorkspacePayments');
+      if (!ws) return;                                     // not on this page
+      const activeTab = window.__activeAdminTab;
+      const tabBtn = document.getElementById('adminTabPaymentsBtn');
+      if (tabBtn && tabBtn.classList.contains('hidden')) tabBtn.classList.remove('hidden');
+      // Only un-hide the WORKSPACE when the 💳 tab is actually the active
+      // one — never fight showAdminWorkspaceTab()'s collapse state.
+      if (activeTab === 'payments') {
+        ws.classList.remove('hidden');
+        const host = document.getElementById('adminPaymentPanelHost');
+        if (host && host.style.display === 'none') host.style.removeProperty('display');
+      }
+    } catch (e) {}
+  }
 
   // 🔄 Pull the latest declarations straight from the cloud, then re-render.
   // Used when the 💳 tab is opened and by the 🔄 Refresh button — this is
