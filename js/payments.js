@@ -943,21 +943,25 @@
     // 📑 The panel now lives inside the admin workspace tab bar
     // ("💳 Incoming Payments" next to Home / Clients / Calculators) instead
     // of floating at the side of the screen as a fixed bubble.
+    const wsVis = document.getElementById('adminWorkspacePayments');
     let host = document.getElementById('adminPaymentPanelHost');
     if (!host) {
       host = document.createElement('div');
       host.id = 'adminPaymentPanelHost';
-      const ws = document.getElementById('adminWorkspacePayments');
-      if (ws) ws.appendChild(host);
+    }
+    // 🪗 CLICK-TO-EXPAND: the host must NEVER carry a stale inline display
+    // value. An old version wrote display:block/none here on every render;
+    // that inline style beat the workspace's .hidden class, so the panel
+    // either leaked into the other admin tabs or stayed stuck when the tab
+    // collapsed — and cards looked "not expandable". Visibility is now
+    // owned exclusively by js/workspace.js showAdminWorkspaceTab().
+    if (host.parentNode !== wsVis) {
+      if (wsVis) wsVis.appendChild(host);
       else document.body.appendChild(host);
     }
     const tabBtn = document.getElementById('adminTabPaymentsBtn');
     if (tabBtn) tabBtn.classList.remove('hidden');
-    // Admins who are already on the 💳 Payments workspace when the panel
-    // first renders (e.g. after a dashboard re-render) get it instantly;
-    // otherwise it stays hidden until the tab is opened.
-    const wsNow = document.getElementById('adminWorkspacePayments');
-    host.style.display = (wsNow && !wsNow.classList.contains('hidden')) ? 'block' : 'none';
+    host.style.removeProperty('display');
     return host;
   }
 
@@ -1009,9 +1013,13 @@
     }
 
     panel.style.cssText = 'background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.08);padding:.9rem 1rem;max-width:720px;margin:0 auto;';
-    // Keep the panel visible only while the 💳 Payments workspace tab is open.
-    const wsVis = document.getElementById('adminWorkspacePayments');
-    panel.style.display = (wsVis && !wsVis.classList.contains('hidden')) ? 'block' : 'none';
+    // 🐛 BUG FIX: do NOT write an inline display on the panel based on the
+    // workspace class anymore. The old line set display:block whenever the
+    // workspace element existed without .hidden — but other code paths
+    // (MutationObserver re-renders) could run while the workspace was being
+    // toggled, leaving a stale inline value that either hid the panel after
+    // opening the tab ("not getting expanded") or leaked it into other tabs.
+    // Visibility is now controlled ONLY by the workspace + host elements.
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
         <strong>💳 Incoming Payments</strong>
