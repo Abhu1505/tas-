@@ -2680,7 +2680,12 @@ button:not(:disabled):active{transform:translateY(0) scale(.98);}
   max-height:0;opacity:0;overflow:hidden;
   transition:max-height .3s var(--ease,cubic-bezier(.22,.9,.3,1)),opacity .25s ease,margin-top .3s ease,padding-top .3s ease;}
 .tas-pay-detail.open{max-height:480px;opacity:1;margin-top:.5rem;padding-top:.55rem;
-  border-top:1px dashed var(--line,#ddd);}
+  border-top:1px dashed var(--line,#ddd);overflow-y:auto;}
+/* 🖊 Edit-mode fields inside an expanded payment card */
+.tas-edit-field{display:block;width:100%;box-sizing:border-box;margin-top:.35rem;
+  font-size:.85rem;padding:.4rem .55rem;border:1px solid var(--line,#ccc);
+  border-radius:8px;background:var(--bg-input,#fff);color:inherit;}
+.tas-pay-card.editing .tas-pay-detail{border-left:3px solid rgba(232,118,39,.7);}
 @media (prefers-reduced-motion:reduce){
   .tas-pay-detail,.tas-pay-chev,.tas-pay-card{transition:none !important;}
 }
