@@ -228,11 +228,25 @@
       const merged = await mergeProfileStats(clientId, {});
       loaded = merged.inputs;
       prof = merged.profile;
+      // 🐛 FIX ("no data in the Calculators tab"): when the cloud read of
+      // client_profiles fails or the row hasn't been cached yet, fall back
+      // to the last known good copy in localStorage so the hub still shows
+      // the client's approved numbers offline instead of going blank.
+      if (!prof || !window.profileHasCalcStats(prof)) {
+        try {
+          const raw = localStorage.getItem(lsKey(clientId));
+          if (raw) {
+            const saved = Object.assign({}, DEFAULTS, JSON.parse(raw) || {});
+            if (['weight', 'height', 'age', 'waist', 'neck', 'hip', 'bench', 'bodyfat']
+                .some(k => Number.isFinite(num(saved[k])))) {
+              loaded = saved;
+            }
+          }
+        } catch (e) { /* corrupt mirror — ignore */ }
+      }
       // Keep the local cache in step with the approved values (offline view).
       if (prof && window.profileHasCalcStats(prof)) {
         try { localStorage.setItem(lsKey(clientId), JSON.stringify(loaded || {})); } catch (e) { }
-      } else {
-        try { localStorage.removeItem(lsKey(clientId)); } catch (e) { }
       }
     }
     current = Object.assign({}, DEFAULTS, loaded || {});
