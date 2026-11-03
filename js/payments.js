@@ -1341,6 +1341,31 @@
     if (!window.__tasPayEditing) window.__tasPayEditing = null;
     const editingKey = window.__tasPayEditing;
 
+    // 🖊 Helper: find the underlying row object from its display key. The
+    // rows array is rebuilt on every render, so this lookup always reads
+    // the CURRENTLY displayed row objects (same references the cards use).
+    const rowByKey = (rk) => {
+      rk = String(rk == null ? '' : rk);
+      return rows.find((p, i) => rowKeyOf(p, i) === rk) ||
+             rows.find(p => String(p.id || '') === rk) || null;
+    };
+
+    // 💾 Pending edit saves that couldn't be applied in a previous render
+    // pass — re-apply them against the CURRENT row objects BEFORE painting,
+    // so the freshly rendered cards show the edited values (amount, method,
+    // reference, note) instead of the stale ones. (Previously this block ran
+    // AFTER `list.innerHTML` was built, so the very render triggered by a
+    // save painted the OLD data — "Amount not updated / Reference not
+    // updated".)
+    if (window.__tasPayPendingSaves && window.__tasPayPendingSaves.length) {
+      console.log('ZZZ applying pending saves:', JSON.stringify(window.__tasPayPendingSaves));
+      window.__tasPayPendingSaves.forEach(s => {
+        const p = rowByKey(s.key) || (s.id ? rows.find(x => String(x.id || '') === String(s.id)) : null);
+        if (p) { p.amount_due = s.amount; p.method = s.method; p.reference = s.reference; p.note = s.note; }
+      });
+      window.__tasPayPendingSaves = [];
+    }
+
     const list = panel.querySelector('#adminPendingList');
     list.innerHTML = rows.length
       ? rows.map((p, i) => {
@@ -1390,24 +1415,6 @@
       }).join('')
       : `<div style="opacity:.7;">✅ No transfers awaiting verification. New client declarations appear here automatically — tap 🔄 Refresh to pull the latest.</div>`;
 
-    // 🖊 Helper: find the underlying row object from its display key. The
-    // rows array is rebuilt on every render, so this lookup always reads
-    // the CURRENTLY displayed row objects (same references the cards use).
-    const rowByKey = (rk) => {
-      rk = String(rk == null ? '' : rk);
-      return rows.find((p, i) => rowKeyOf(p, i) === rk) ||
-             rows.find(p => String(p.id || '') === rk) || null;
-    };
-    // 💾 Pending edit saves that couldn't be applied in a previous render
-    // pass — re-applied here against the fresh rows before painting.
-    if (window.__tasPayPendingSaves && window.__tasPayPendingSaves.length) {
-      window.__tasPayPendingSaves.forEach(s => {
-        const p = rowByKey(s.key);
-        if (p) { p.amount_due = s.amount; p.method = s.method; p.reference = s.reference; p.note = s.note; }
-      });
-      window.__tasPayPendingSaves = [];
-    }
-
     // Delegated expand/collapse for the payment cards. Bound ONCE on the
     // persistent host element (#adminPaymentPanelHost) — NOT on the panel
     // div itself, because renderAdminPaymentPanel() replaces that div's
@@ -1445,6 +1452,7 @@
     }
 
     panel.onclick = async (ev) => {
+      console.log('ZZZ onclick fired, target=', ev.target.tagName, ev.target.className, 'svMatch=', !!(ev.target.closest && ev.target.closest('[data-save-pay]')));
       const ap = ev.target.closest('[data-approve-pay]');
       const rj = ev.target.closest('[data-reject-pay]');
       const ed = ev.target.closest('[data-edit-pay]');
@@ -1470,8 +1478,10 @@
       else if (sv) {
         try {
           const rk = sv.dataset.savePay;
+          console.log('ZZZ sv entered rk=', rk);
           const cardEl = sv.closest('.tas-pay-card');
           const p = rowByKey(rk);
+          console.log('ZZZ p=', !!p, 'cardEl=', !!cardEl);
           if (!p || !cardEl) { toast('⚠️ Row not found — tap 🔄 Refresh and try again.', 'warning'); return; }
           const g = (f) => { const el = cardEl.querySelector(`[data-edit-field="${f}"]`); return el ? String(el.value).trim() : ''; };
           const newAmount = parseFloat(g('amount').replace(/[^0-9.\-]/g, ''));
